@@ -1,0 +1,35 @@
+# The typst compiler, as a WebAssembly module.
+[package]
+name = "librepaper-wasm-typst"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "The Typst compiler rendering to PDF, as a WebAssembly module"
+repository = "https://github.com/LibrePaper/librepaper-wasm-typst"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "typst_wasm"
+
+[dependencies]
+# Pinned exactly, and pinned together: whatever renders a typst document
+# elsewhere must be this same compiler, or the same source renders two ways.
+typst = "=0.15.1"
+typst-layout = "=0.15.1"
+typst-pdf = "=0.15.1"
+# Typst's own default fonts, embedded, so a document compiles here exactly as
+# it does under the typst binary: the same faces, and the maths font without
+# which maths does not compile at all.
+typst-assets = { version = "=0.15.1", features = ["fonts"] }
+# Diagnostics come back from typst in its own vector type.
+ecow = "0.2"
+
+# As small as it can be. Thirty megabytes is what the compiler and its fonts
+# cost before compression, and every byte is fetched by someone opening a
+# document.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

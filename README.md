@@ -79,25 +79,13 @@ belong upstream first.
 
 ## Licence
 
-Copyright (C) 2026 Vincent Arel-Bundock.
-
-This program is free software: you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation, either version 3 of the License, or (at your option) any later
-version. It is distributed in the hope that it will be useful, but WITHOUT ANY
-WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
-PARTICULAR PURPOSE. See the GNU General Public License in [LICENSE](LICENSE) for
-more details.
-
-Version 3 is not incidental. The compiler this links is Apache-2.0, which is
-compatible with GPLv3 and *not* with GPLv2 — so GPLv2 was never available to
-this repository, whatever the markdown one does.
+The code in this repository is MIT. See [LICENSE](LICENSE).
 
 What `typst.wasm` contains is not only this code. It statically links the Typst
-compiler and embeds the assets shipped by `typst-assets`, which are under five
-distinct sets of terms — the SIL Open Font License 1.1 (Libertinus Serif, with
-Reserved Font Names), the GUST Font License (New Computer Modern), a separate
-Distribution Exception for `NewCM10-Regular`, a BSD-style PDFium licence (the
-Foxit base-14 faces), and CC0 (the ICC profiles). Those stay under their own
-terms; the GPL here covers the code in this repository. Their notices must
-travel with the built artifact — see [NOTICE](NOTICE).
+compiler, which is Apache-2.0, and embeds the assets shipped by
+`typst-assets`, which are under five distinct sets of terms — the SIL Open Font
+License 1.1 (Libertinus Serif, with Reserved Font Names), the GUST Font License
+(New Computer Modern), a separate Distribution Exception for `NewCM10-Regular`,
+a BSD-style PDFium licence (the Foxit base-14 faces), and CC0 (the ICC
+profiles). Their notices must travel with the built artifact — see
+[NOTICE](NOTICE).

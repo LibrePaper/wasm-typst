@@ -1,5 +1,4 @@
-This repository's own code is under the GNU General Public License, version 3
-or later; see LICENSE.
+This repository's own code is under the MIT License; see LICENSE.
 
 The module it builds, typst.wasm, additionally contains third-party components
 that remain under their own terms. They are reproduced verbatim in

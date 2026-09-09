@@ -12,6 +12,10 @@ crate-type = ["cdylib", "rlib"]
 name = "typst_wasm"
 
 [dependencies]
+# The shared page template, diagnostics and WebAssembly interface. A path
+# dependency while the repositories sit side by side; it becomes a git
+# dependency pinned to a tag once they are pushed.
+librepaper-wasm-helpers = { path = "../librepaper-wasm-helpers" }
 # Pinned exactly, and pinned together: whatever renders a typst document
 # elsewhere must be this same compiler, or the same source renders two ways.
 typst = "=0.15.1"

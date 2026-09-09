@@ -36,6 +36,34 @@ Nothing but cargo is needed. There is no bindgen step, and no Docker: this is
 plain Rust from crates.io, which is the reason the typst engine has never had
 the supply-chain question the TeX engines do.
 
+## Serving it
+
+`make compress` writes `dist/typst.wasm.br` and `dist/typst.wasm.gz` beside the
+module. This matters more here than anywhere else in LibrePaper: it is the
+largest thing a reader ever fetches, and brotli takes two thirds of it off.
+
+| | Size | Saving |
+| --- | ---: | ---: |
+| raw | 32.0 MiB | |
+| brotli, q11 | **9.5 MiB** | 70.3% |
+| gzip, level 9 | 13.6 MiB | 57.4% |
+
+Brotli is worth 4.1 MiB over gzip on this file — the difference between the two
+is itself larger than most of what a page loads. Quality 11 with a 16 MB window
+(`lgwin` 24) is the most the format allows a browser to decode; above 24 is
+brotli's large-window extension, which no browser implements. It costs about a
+minute, once, at build time.
+
+Serve the precompressed file with `Content-Encoding: br`, `Vary:
+Accept-Encoding`, and — this is the one that bites —
+`Content-Type: application/wasm`. `WebAssembly.instantiateStreaming` rejects
+anything else, and the content type describes the module, not the encoding it
+arrived in.
+
+The compression step is the only thing in this repository that needs node. It
+uses `node:zlib`, so there is nothing to install, and a build without node
+still produces the module.
+
 ## The interface
 
 Plain WebAssembly exports over linear memory rather than wasm-bindgen, so the

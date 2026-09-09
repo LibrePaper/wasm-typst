@@ -33,7 +33,9 @@ make test                                  # the renderer's tests, natively
 ```
 
 The native test suite includes the PDF corpus under `tests/typst-corpus/`:
-imports, embedded assets, repeated compilation, and structured diagnostics.
+imports, embedded assets, repeated compilation, structured diagnostics, a
+package under `packages/preview/mini/0.1.0`, and a font file the document
+brings.
 
 Nothing but cargo is needed. There is no bindgen step, and no Docker: this is
 plain Rust from crates.io, which is the reason the typst engine has never had
@@ -63,9 +65,10 @@ Accept-Encoding`, and — this is the one that bites —
 anything else, and the content type describes the module, not the encoding it
 arrived in.
 
-The compression step is the only thing in this repository that needs node. It
-uses `node:zlib`, so there is nothing to install, and a build without node
-still produces the module.
+The compression step and `tools/roundtrip.mjs`, which checks the package and
+font round trip against the live registry, are the only things in this
+repository that need node. They use `node:zlib`, so there is nothing to
+install, and a build without node still produces the module.
 
 ## The interface
 
@@ -86,6 +89,7 @@ memory, calls, and reads the result back out.
 | `set_asset_url(path, url)` | accepted and ignored; typst reads a figure out of the file map and writes it into the PDF itself |
 | `set_today(y, m, d)` | what `datetime.today()` answers — the module has no clock, so the host hands it one |
 | `word_diff(old, new)` | the shared word-level diff, as JSON |
+| `needs` / `needs_ptr` | what the last compile could not find — packages and font families — as JSON |
 
 A compile leaves two results side by side: the document where `output_ptr`
 points, and the diagnostics where `diagnostics_ptr` does. Two rather than one
@@ -97,7 +101,50 @@ Diagnostic columns count UTF-16 code units, because that is what an editor
 counts in. See `src/abi.rs`, which documents the convention in full.
 
 There is no directory in a browser: a document reaches exactly the files the
-host put in the map with `add_file`, and nothing else.
+host put in the map with `add_file`, and nothing else. Packages and fonts are
+files like any other, and the next section is how they get there.
+
+## Packages and fonts
+
+The module cannot fetch. So a compile also answers what it went looking for
+and did not find, and the host fetches that, adds it to the map, and compiles
+again:
+
+```json
+{"packages":[{"namespace":"preview","name":"cetz","version":"0.3.4",
+              "dir":"@preview/cetz/0.3.4",
+              "url":"https://packages.typst.org/preview/cetz-0.3.4.tar.gz"}],
+ "fonts":["tex gyre cursor"]}
+```
+
+**Packages.** An `#import "@preview/cetz:0.3.4"` asks the file map for the
+package's files under `@preview/cetz/0.3.4/`, so the host unpacks the archive
+the registry serves at `url` and adds each entry under `dir`. The registry
+allows cross-origin requests and serves a version's archive with a 90-day
+cache lifetime; a published version never changes, so there is nothing to
+mirror. A package's own dependencies surface on the next round, and a document
+that compiles cleanly needs nothing more: a few rounds at most, each one
+cached by the browser. A missing file *inside* a package the host supplied is a
+broken package, and is reported as a file not found rather than a package to
+fetch again.
+
+**Fonts.** Typst never loads fonts from a project, but this module does: every
+font file in the map (`.ttf`, `.otf`, `.ttc`, `.otc`, under any path) is
+layered over the embedded defaults, which is what `--font-path` does for the
+binary. A family the document names and the map lacks is set in the fallback,
+warned about, and listed under `fonts` — lowercased, because that is how typst
+matches a family name, and so how a font index should be keyed. Which fonts a
+host can offer is the host's decision; the module only says which were asked
+for.
+
+The fonts in the map are parsed once per distinct set and remembered, so a
+keystroke does not re-parse them; only the set changing does.
+
+The same round trip is the native side's to make: `typst::render` takes the
+reader and the font files, and answers an `Outcome` whose `needs` is the same
+list. A server resolves a package directory against a cache on disk and
+downloads on a miss; the bytes are the same, so preview and publication still
+agree.
 
 ## Keeping in step
 

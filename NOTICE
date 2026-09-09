@@ -19,5 +19,9 @@ In summary, for typst-assets 0.15.1:
 The Typst compiler itself (typst, typst-layout, typst-pdf, typst-assets, all
 pinned at 0.15.1) is Apache-2.0. ecow is MIT OR Apache-2.0.
 
+The test corpus, which is not part of the module, carries one font file:
+tests/typst-corpus/fonts/texgyrecursor-regular.otf, TeX Gyre Cursor from the
+GUST e-foundry, under the GUST Font License 1.0 reproduced in NOTICE.upstream.
+
 Apache-2.0 is compatible with GPL version 3 and is not compatible with version
 2, which is why this repository is GPLv3-or-later rather than GPLv2.

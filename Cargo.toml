@@ -1,7 +1,7 @@
 # The typst compiler, as a WebAssembly module.
 [package]
 name = "wasm-typst"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 # Never goes to crates.io: these are consumed by path while the repositories

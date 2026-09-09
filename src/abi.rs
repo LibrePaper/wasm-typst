@@ -1,10 +1,16 @@
-//! The sixteen exports a host calls, and nothing else.
+//! The eighteen exports a host calls, and nothing else.
 //!
 //! Each one wraps the shared implementation in `wasm_helpers::abi`.
 //! They are written out rather than generated because a `#[no_mangle]` export
 //! has to be compiled into the `cdylib` that ships and cannot be inherited from
-//! a dependency -- and because sixteen signatures you can read beat a macro
+//! a dependency -- and because eighteen signatures you can read beat a macro
 //! that writes them and reports its errors somewhere else.
+//!
+//! Two of them are this module's alone. `needs` and `needs_ptr` say what the
+//! last compile went looking for and did not find -- packages and font
+//! families -- as JSON, so the host can fetch them, `add_file` them, and
+//! compile again. A loader that has never heard of them loses nothing but
+//! packages.
 //!
 //! One of these does nothing here. `set_asset_url` is accepted and ignored:
 //! typst reads a figure out of the file map and writes it into the PDF itself,
@@ -14,8 +20,13 @@
 use wasm_helpers::abi;
 use wasm_helpers::diagnostic::Compiled;
 
+/// What the last compile could not find, as JSON, for `needs` to hand over.
+static mut NEEDS: Option<Vec<u8>> = None;
+
 /// What this module is: typst, reading only the files the host handed over.
-/// There is no directory in a browser, and a document reaches nothing else.
+/// There is no directory in a browser, and a document reaches nothing else --
+/// a package is the files the host put under its directory, and a font is a
+/// font file the host put anywhere in the map.
 fn render(source: &str, title: &str) -> Compiled {
     let today = abi::today().map(|(year, month, day)| crate::typst::Today {
         year,
@@ -23,7 +34,14 @@ fn render(source: &str, title: &str) -> Compiled {
         day: day as u8,
     });
     let name = abi::main_name();
-    crate::typst::render(source, title, &name, &|path| abi::file(path), today)
+    let fonts: Vec<(String, Vec<u8>)> = abi::files()
+        .into_iter()
+        .filter(|(path, _)| crate::typst::is_font(path))
+        .collect();
+    let outcome =
+        crate::typst::render(source, title, &name, &|path| abi::file(path), &fonts, today);
+    unsafe { NEEDS = Some(outcome.needs.json().into_bytes()) }
+    outcome.compiled
 }
 
 fn heading(source: &str) -> String {
@@ -148,4 +166,30 @@ pub extern "C" fn diagnostics() -> usize {
 #[no_mangle]
 pub extern "C" fn diagnostics_ptr() -> *const u8 {
     abi::diagnostics_ptr()
+}
+
+/// The length of what the last compile went looking for and did not find, as
+/// JSON: `{"packages":[{"namespace","name","version","dir","url"}],"fonts":[]}`.
+/// The host fetches each, adds a package's files under `dir` and a font file
+/// under any name, and compiles again; an empty list means the document had
+/// everything. Zero before any compile.
+#[no_mangle]
+pub extern "C" fn needs() -> usize {
+    unsafe {
+        match &*std::ptr::addr_of!(NEEDS) {
+            Some(bytes) => bytes.len(),
+            None => 0,
+        }
+    }
+}
+
+/// Where that JSON starts.
+#[no_mangle]
+pub extern "C" fn needs_ptr() -> *const u8 {
+    unsafe {
+        match &*std::ptr::addr_of!(NEEDS) {
+            Some(bytes) => bytes.as_ptr(),
+            None => std::ptr::null(),
+        }
+    }
 }

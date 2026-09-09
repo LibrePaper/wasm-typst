@@ -32,6 +32,9 @@ make build                                 # -> dist/typst.wasm  (slow)
 make test                                  # the renderer's tests, natively
 ```
 
+The native test suite includes the PDF corpus under `tests/typst-corpus/`:
+imports, embedded assets, repeated compilation, and structured diagnostics.
+
 Nothing but cargo is needed. There is no bindgen step, and no Docker: this is
 plain Rust from crates.io, which is the reason the typst engine has never had
 the supply-chain question the TeX engines do.

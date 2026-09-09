@@ -1,6 +1,6 @@
 //! The sixteen exports a host calls, and nothing else.
 //!
-//! Each one wraps the shared implementation in `librepaper_wasm_helpers::abi`.
+//! Each one wraps the shared implementation in `wasm_helpers::abi`.
 //! They are written out rather than generated because a `#[no_mangle]` export
 //! has to be compiled into the `cdylib` that ships and cannot be inherited from
 //! a dependency -- and because sixteen signatures you can read beat a macro
@@ -11,8 +11,8 @@
 //! so it needs no URL for one. It is exported anyway, so that one loader drives
 //! every renderer without first asking which it has.
 
-use librepaper_wasm_helpers::abi;
-use librepaper_wasm_helpers::diagnostic::Compiled;
+use wasm_helpers::abi;
+use wasm_helpers::diagnostic::Compiled;
 
 /// What this module is: typst, reading only the files the host handed over.
 /// There is no directory in a browser, and a document reaches nothing else.

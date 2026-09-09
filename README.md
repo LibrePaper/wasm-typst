@@ -1,4 +1,4 @@
-# librepaper-wasm-typst
+# wasm-typst
 
 The [Typst](https://typst.app) compiler rendering to PDF, compiled to
 WebAssembly.
@@ -100,7 +100,7 @@ host put in the map with `add_file`, and nothing else.
 
 The page template, the diagnostics type, the word diff and the WebAssembly
 interface come from
-[librepaper-wasm-helpers](https://github.com/LibrePaper/librepaper-wasm-helpers),
+[wasm-helpers](https://github.com/LibrePaper/wasm-helpers),
 whose version is the interface's version: if a host has to be called
 differently, that crate changes and this one fails to compile until it is
 rebuilt.

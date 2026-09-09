@@ -10,13 +10,13 @@
 //! fonts -- so a host fetches it only for someone who actually opens a typst
 //! document. What this repository holds is the compiler binding; the page
 //! template, the diagnostics and the WebAssembly interface it answers through
-//! come from `librepaper-wasm-helpers`, whose version is the interface's
+//! come from `wasm-helpers`, whose version is the interface's
 //! version.
 
 /// The shared page template and the shape a compile answers in, re-exported so
 /// that `crate::page` and `crate::diagnostic` mean here what they mean in every
 /// other renderer.
-pub use librepaper_wasm_helpers::{diagnostic, page};
+pub use wasm_helpers::{diagnostic, page};
 
 pub mod typst;
 

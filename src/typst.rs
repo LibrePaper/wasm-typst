@@ -240,6 +240,22 @@ pub fn is_font(name: &str) -> bool {
         .any(|extension| lower.ends_with(extension))
 }
 
+/// The families a font file carries, lowercased as the compiler matches them,
+/// with duplicates removed. Empty for bytes that are not a font at all.
+///
+/// A host that keeps a font library has to know what it just took in, and the
+/// answer has to come from the compiler that will set the text: `Font::iter` is
+/// what `Fonts::new` reads a face with, so what it names here is exactly what a
+/// document can then ask for by name.
+pub fn families_in(bytes: &[u8]) -> Vec<String> {
+    let mut families: Vec<String> = Font::iter(Bytes::new(bytes.to_vec()))
+        .map(|font| font.info().family.to_lowercase())
+        .collect();
+    families.sort();
+    families.dedup();
+    families
+}
+
 /// The library, built once for Typst's normal paged output.
 fn library() -> &'static LazyHash<Library> {
     static LIBRARY: OnceLock<LazyHash<Library>> = OnceLock::new();

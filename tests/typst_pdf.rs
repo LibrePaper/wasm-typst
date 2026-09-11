@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use wasm_helpers::diagnostic::RenderedDocument;
-use wasm_typst::typst::{compile_pdf, no_files, FontFiles, Package};
+use wasm_typst::typst::{compile_pdf, families_in, no_files, FontFiles, Package};
 
 const PAPER: &str = include_str!("../tests/typst-corpus/paper.typ");
 const LONG: &str = include_str!("../tests/typst-corpus/long.typ");
@@ -207,4 +207,15 @@ fn a_font_in_the_map_is_a_font_the_document_can_use() {
         .warnings()
         .any(|warning| warning.message == "could not read any font from fonts/junk.ttf"));
     assert_eq!(unreadable.needs.fonts, vec!["tex gyre cursor".to_string()]);
+}
+
+/// The names a host may file a font under are the names the compiler will match
+/// it by, so the two come from the same reader.
+#[test]
+fn families_are_read_from_the_font_itself() {
+    assert_eq!(families_in(CURSOR), vec!["tex gyre cursor".to_string()]);
+    // Bytes that carry no face name nothing, rather than failing: an upload
+    // that is not a font is an ordinary thing for a library to be handed.
+    assert!(families_in(b"not a font").is_empty());
+    assert!(families_in(&[]).is_empty());
 }

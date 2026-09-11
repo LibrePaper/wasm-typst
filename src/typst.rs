@@ -246,9 +246,24 @@ fn library() -> &'static LazyHash<Library> {
     LIBRARY.get_or_init(|| LazyHash::new(Library::builder().build()))
 }
 
+/// The library for Typst's experimental HTML target. HTML is an opt-in
+/// feature in Typst, so it gets its own library and cannot change the PDF
+/// compiler's default feature set.
+fn html_library() -> &'static LazyHash<Library> {
+    static LIBRARY: OnceLock<LazyHash<Library>> = OnceLock::new();
+    LIBRARY.get_or_init(|| {
+        LazyHash::new(
+            Library::builder()
+                .with_features(std::iter::once(typst::Feature::Html).collect())
+                .build(),
+        )
+    })
+}
+
 /// One document, the files it may import, its fonts, and the date.
 struct DocumentWorld<'a> {
     main: Source,
+    library: &'static LazyHash<Library>,
     files: Files<'a>,
     fonts: Arc<Fonts>,
     today: Option<Datetime>,
@@ -291,7 +306,7 @@ impl DocumentWorld<'_> {
 
 impl World for DocumentWorld<'_> {
     fn library(&self) -> &LazyHash<Library> {
-        library()
+        self.library
     }
 
     fn book(&self) -> &LazyHash<FontBook> {
@@ -321,6 +336,81 @@ impl World for DocumentWorld<'_> {
 
     fn today(&self, _offset: Option<Duration>) -> Option<Datetime> {
         self.today
+    }
+}
+
+/// Compiles a source to Typst's experimental, self-contained HTML output.
+/// Images are encoded by typst-html as data URLs, so the returned document
+/// does not depend on unauthenticated network requests or an asset server.
+pub fn compile_html(
+    source: &str,
+    name: &str,
+    files: Files,
+    fonts: FontFiles,
+    today: Option<Today>,
+) -> Outcome {
+    let world = DocumentWorld {
+        main: Source::new(main_id(name), source.to_string()),
+        library: html_library(),
+        files,
+        fonts: self::fonts(fonts),
+        today: today.and_then(|t| Datetime::from_ymd(t.year, t.month, t.day)),
+        missing: Mutex::new(Vec::new()),
+    };
+
+    let compiled = typst::compile::<typst_html::HtmlDocument>(&world);
+    let mut diagnostics = describe(&world, &compiled.warnings);
+    let output = match compiled.output {
+        Ok(document) => match typst_html::html(&document, &typst_html::HtmlOptions::default()) {
+            Ok(html) => Some(RenderedDocument::Html(html)),
+            Err(errors) => {
+                diagnostics.extend(describe(&world, &errors));
+                None
+            }
+        },
+        Err(errors) => {
+            diagnostics.extend(describe(&world, &errors));
+            None
+        }
+    };
+    typst::comemo::evict(1);
+
+    let mut needs = Needs {
+        packages: std::mem::take(
+            &mut *world
+                .missing
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        ),
+        fonts: Vec::new(),
+    };
+    needs.packages.sort();
+    for diagnostic in &diagnostics {
+        if let Some(family) = diagnostic.message.strip_prefix(UNKNOWN_FAMILY) {
+            if !needs.fonts.iter().any(|known| known == family) {
+                needs.fonts.push(family.to_string());
+            }
+        }
+    }
+    for name in &world.fonts.unreadable {
+        diagnostics.push(Diagnostic::spanless(
+            Severity::Warning,
+            format!("could not read any font from {name}"),
+        ));
+    }
+    diagnostics.sort_by_key(|diagnostic| !diagnostic.is_error());
+    if output.is_none() && !diagnostics.iter().any(Diagnostic::is_error) {
+        diagnostics.push(Diagnostic::spanless(
+            Severity::Error,
+            "typst could not compile this",
+        ));
+    }
+    Outcome {
+        compiled: Compiled {
+            output,
+            diagnostics,
+        },
+        needs,
     }
 }
 
@@ -395,6 +485,7 @@ pub fn compile_pdf(
 ) -> Outcome {
     let world = DocumentWorld {
         main: Source::new(main_id(name), source.to_string()),
+        library: library(),
         files,
         fonts: self::fonts(fonts),
         today: today.and_then(|t| Datetime::from_ymd(t.year, t.month, t.day)),

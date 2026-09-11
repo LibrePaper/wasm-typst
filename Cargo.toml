@@ -1,7 +1,7 @@
 # The typst compiler, as a WebAssembly module.
 [package]
 name = "wasm-typst"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 # Never goes to crates.io: these are consumed by path while the repositories
@@ -30,6 +30,7 @@ wasm-helpers = { git = "https://github.com/LibrePaper/wasm-helpers", tag = "v0.1
 typst = "=0.15.1"
 typst-layout = "=0.15.1"
 typst-pdf = "=0.15.1"
+typst-html = "=0.15.1"
 # Typst's own default fonts, embedded, so a document compiles here exactly as
 # it does under the typst binary: the same faces, and the maths font without
 # which maths does not compile at all.

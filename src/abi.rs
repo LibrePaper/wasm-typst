@@ -1,4 +1,4 @@
-//! The eighteen exports a host calls, and nothing else.
+//! The nineteen exports a host calls, and nothing else.
 //!
 //! Each one wraps the shared implementation in `wasm_helpers::abi`.
 //! They are written out rather than generated because a `#[no_mangle]` export
@@ -12,10 +12,10 @@
 //! compile again. A loader that has never heard of them loses nothing but
 //! packages.
 //!
-//! One of these does nothing here. `set_asset_url` is accepted and ignored:
-//! typst reads a figure out of the file map and writes it into the PDF itself,
-//! so it needs no URL for one. It is exported anyway, so that one loader drives
-//! every renderer without first asking which it has.
+//! `set_asset_url` is accepted and ignored: typst reads a figure out of the
+//! file map and embeds it in PDF and HTML output itself, so it needs no URL.
+//! It is exported anyway, so that one loader drives every renderer without
+//! first asking which it has.
 
 use wasm_helpers::abi;
 use wasm_helpers::diagnostic::Compiled;
@@ -40,6 +40,23 @@ fn render(source: &str, title: &str) -> Compiled {
         .collect();
     let outcome =
         crate::typst::render(source, title, &name, &|path| abi::file(path), &fonts, today);
+    unsafe { NEEDS = Some(outcome.needs.json().into_bytes()) }
+    outcome.compiled
+}
+
+fn render_html(source: &str, title: &str) -> Compiled {
+    let today = abi::today().map(|(year, month, day)| crate::typst::Today {
+        year,
+        month: month as u8,
+        day: day as u8,
+    });
+    let name = abi::main_name();
+    let fonts: Vec<(String, Vec<u8>)> = abi::files()
+        .into_iter()
+        .filter(|(path, _)| crate::typst::is_font(path))
+        .collect();
+    let _ = title;
+    let outcome = crate::typst::compile_html(source, &name, &|path| abi::file(path), &fonts, today);
     unsafe { NEEDS = Some(outcome.needs.json().into_bytes()) }
     outcome.compiled
 }
@@ -72,6 +89,24 @@ pub unsafe extern "C" fn compile(
     let source = abi::text_at(source, source_len);
     let title = abi::text_at(title, title_len);
     abi::answer_compiled(render(source, title))
+}
+
+/// Compile to Typst's experimental HTML output. The signature intentionally
+/// matches `compile`; the host can select the target without changing the
+/// file, font, diagnostics, or needs ABI.
+///
+/// # Safety
+/// The pointers and lengths must describe UTF-8 written into this module.
+#[no_mangle]
+pub unsafe extern "C" fn compile_html(
+    source: *const u8,
+    source_len: usize,
+    title: *const u8,
+    title_len: usize,
+) -> usize {
+    let source = abi::text_at(source, source_len);
+    let title = abi::text_at(title, title_len);
+    abi::answer_compiled(render_html(source, title))
 }
 
 /// # Safety

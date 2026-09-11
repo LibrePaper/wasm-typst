@@ -2740,11 +2740,12 @@ source = "git+https://github.com/LibrePaper/wasm-helpers?tag=v0.1.1#29aeedcca6f8
 
 [[package]]
 name = "wasm-typst"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ecow",
  "typst",
  "typst-assets",
+ "typst-html",
  "typst-layout",
  "typst-pdf",
  "wasm-helpers",

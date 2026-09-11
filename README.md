@@ -1,7 +1,7 @@
 # wasm-typst
 
-The [Typst](https://typst.app) compiler rendering to PDF, compiled to
-WebAssembly.
+The [Typst](https://typst.app) compiler rendering to PDF and experimental HTML,
+compiled to WebAssembly.
 
 Part of [LibrePaper](https://github.com/LibrePaper). The module is what a
 LibrePaper editor previews a typst document with, and it is the same pinned
@@ -80,13 +80,14 @@ memory, calls, and reads the result back out.
 | Export | What it does |
 | --- | --- |
 | `alloc` / `dealloc` | reserve and release memory for arguments |
-| `compile(source, title)` | compile; returns the length of the result |
-| `output_ptr` / `ok` / `output_kind` | where the result is, whether it is a document, and its format (2 = PDF) |
+| `compile(source, title)` | compile to PDF; returns the length of the result |
+| `compile_html(source, title)` | compile to experimental, self-contained HTML; same ABI and result handling |
+| `output_ptr` / `ok` / `output_kind` | where the result is, whether it is a document, and its format (1 = HTML, 2 = PDF) |
 | `diagnostics` / `diagnostics_ptr` | what the compiler had to say, as JSON |
 | `failure_page(title)` | the diagnostics dressed as a document |
 | `title_of(source)` | the first level-one heading |
 | `add_file` / `clear_files` / `set_main` | the file map a document is compiled against |
-| `set_asset_url(path, url)` | accepted and ignored; typst reads a figure out of the file map and writes it into the PDF itself |
+| `set_asset_url(path, url)` | accepted and ignored; typst embeds figures in both PDF and HTML output |
 | `set_today(y, m, d)` | what `datetime.today()` answers — the module has no clock, so the host hands it one |
 | `word_diff(old, new)` | the shared word-level diff, as JSON |
 | `needs` / `needs_ptr` | what the last compile could not find — packages and font families — as JSON |

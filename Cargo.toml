@@ -1,0 +1,49 @@
+# The typst compiler, as a WebAssembly module.
+[package]
+name = "wasm-typst"
+version = "0.3.1"
+edition = "2021"
+license = "MIT"
+# Never goes to crates.io: these are consumed by path while the repositories
+# sit side by side, and by git tag once they are pushed.
+publish = false
+description = "The Typst compiler rendering to PDF, as a WebAssembly module"
+repository = "https://github.com/LibrePaper/wasm-typst"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# On for this crate's own module, and off when another crate links it as a
+# library: a `#[no_mangle]` export belongs to exactly one cdylib, and two sets
+# of them do not link.
+default = ["exports"]
+exports = []
+
+[dependencies]
+# The shared page template, diagnostics and WebAssembly interface. A path
+# dependency while the repositories sit side by side; it becomes a git
+# dependency pinned to a tag once they are pushed.
+wasm-helpers = { git = "https://github.com/LibrePaper/wasm-helpers", tag = "v0.1.1" }
+# Pinned exactly, and pinned together: whatever renders a typst document
+# elsewhere must be this same compiler, or the same source renders two ways.
+typst = "=0.15.1"
+typst-layout = "=0.15.1"
+typst-pdf = "=0.15.1"
+typst-html = "=0.15.1"
+# Typst's own default fonts, embedded, so a document compiles here exactly as
+# it does under the typst binary: the same faces, and the maths font without
+# which maths does not compile at all.
+typst-assets = { version = "=0.15.1", features = ["fonts"] }
+# Diagnostics come back from typst in its own vector type.
+ecow = "0.2"
+
+# As small as it can be. Thirty megabytes is what the compiler and its fonts
+# cost before compression, and every byte is fetched by someone opening a
+# document.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

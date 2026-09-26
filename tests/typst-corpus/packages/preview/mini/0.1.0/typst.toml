@@ -1,0 +1,7 @@
+[package]
+name = "mini"
+version = "0.1.0"
+entrypoint = "lib.typ"
+authors = ["LibrePaper"]
+license = "MIT"
+description = "A test package: the smallest thing an @preview import can resolve to"

@@ -1,0 +1,27 @@
+This repository's own code is under the MIT License; see LICENSE.
+
+The module it builds, typst.wasm, additionally contains third-party components
+that remain under their own terms. They are reproduced verbatim in
+NOTICE.upstream, which is the NOTICE file shipped by typst-assets 0.15.1, and
+they must travel with the artifact when it is redistributed.
+
+In summary, for typst-assets 0.15.1:
+
+  SIL Open Font License 1.1   Libertinus Serif (files/fonts/LibertinusSerif-*.otf)
+                              Reserved Font Names: "Linux Libertine",
+                              "Biolinum", "STIX Fonts"
+  GUST Font License 1.0       New Computer Modern, other than NewCM10-Regular
+                              (files/fonts/NewCM*.otf)
+  NewComputerModern License   NewCM10-Regular, under a Distribution Exception
+  PDFium (BSD-style)          the Foxit base-14 faces (files/fonts/Foxit*.pfb)
+  CC0 1.0 Universal           the ICC profiles (files/icc/*-v4.icc)
+
+The Typst compiler itself (typst, typst-layout, typst-pdf, typst-assets, all
+pinned at 0.15.1) is Apache-2.0. ecow is MIT OR Apache-2.0.
+
+The test corpus, which is not part of the module, carries one font file:
+tests/typst-corpus/fonts/texgyrecursor-regular.otf, TeX Gyre Cursor from the
+GUST e-foundry, under the GUST Font License 1.0 reproduced in NOTICE.upstream.
+
+Apache-2.0 is compatible with GPL version 3 and is not compatible with version
+2, which is why this repository is GPLv3-or-later rather than GPLv2.

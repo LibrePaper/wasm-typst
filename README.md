@@ -8,9 +8,10 @@ LibrePaper editor previews a typst document with, and it is the same pinned
 compiler that renders a document when one is published — so the same source
 cannot render two ways.
 
-The build is around thirty megabytes before compression: the compiler and its
-default fonts. A host fetches it only for someone who actually opens a typst
-document.
+The compatibility build is around thirty megabytes before compression: the
+compiler and its default fonts. The browser release keeps the complete
+compiler, serves the same fonts separately, and checks that the compiler stays
+below 25 MiB.
 
 ## The pin
 
@@ -20,15 +21,16 @@ rendered it behaves, so anything else rendering LibrePaper typst documents has
 to be this same version. Moving the pin is a deliberate change with a version
 bump here, not a `cargo update`.
 
-The default fonts are embedded rather than fetched, so a document compiles here
-exactly as it does under the `typst` binary: the same faces, and the maths font
-without which maths does not compile at all.
+Default Cargo builds embed Typst's stock fonts, so native consumers retain the
+same faces as the `typst` binary. The browser mirror build disables that feature
+and loads those exact pinned font bytes before compiling.
 
 ## Building
 
 ```sh
 rustup target add wasm32-unknown-unknown   # once
-make build                                 # -> dist/typst.wasm  (slow)
+make build                                 # embedded compatibility WASM
+make mirror                                # external-font browser WASM + static mirror
 make test                                  # the renderer's tests, natively
 ```
 
@@ -41,7 +43,7 @@ Nothing but cargo is needed. There is no bindgen step, and no Docker: this is
 plain Rust from crates.io, which is the reason the typst engine has never had
 the supply-chain question the TeX engines do.
 
-## Serving it
+## Serving the compatibility module
 
 `make compress` writes `dist/typst.wasm.br` and `dist/typst.wasm.gz` beside the
 module. This matters more here than anywhere else in LibrePaper: it is the
@@ -65,9 +67,35 @@ Accept-Encoding`, and — this is the one that bites —
 anything else, and the content type describes the module, not the encoding it
 arrived in.
 
-The compression step and `tools/roundtrip.mjs`, which checks the package and
-font round trip against the live registry, are the only things in this
-repository that need node. They use `node:zlib`, so there is nothing to
+## Static browser mirror
+
+`make mirror` builds the browser module with `--no-default-features --features
+exports`. It reads the exact `typst-assets` 0.15.1 source path from locked
+`cargo metadata`, copies the 17 fonts in the order exposed by that crate, and
+writes:
+
+```text
+mirror/<full-wasm-sha256>/typst.wasm
+mirror/<full-wasm-sha256>/fonts.json
+mirror/fonts/<font-sha256>.<ext>
+```
+
+Each manifest entry has a URL relative to `fonts.json`, its SHA-256 digest, and
+its byte size. The generator validates the copied module and every font before
+finishing, and rejects a module above 25 MiB. It prints both the module digest
+and manifest digest for the application pin. No precompressed sidecars are
+uploaded: Cloudflare Static Assets negotiates Brotli automatically. The
+`_headers` file allows cross-origin requests and sets the WebAssembly and font
+MIME types. `wrangler.toml` configures a static-only deployment named `typst`.
+
+Run `make mirror-push` with Wrangler and SOPS installed to publish the static
+directory using the Cloudflare credentials in the sibling application's
+`deploy/keys.yaml` (override `KEYS=` when needed). The mirror includes this
+repository's `LICENSE`, `NOTICE`, and upstream font notices.
+
+The mirror generator, compression step and `tools/roundtrip.mjs`, which checks
+the package and font round trip against the live registry, need Node.js.
+They use only built-in modules, so there is nothing to
 install, and a build without node still produces the module.
 
 ## The interface
@@ -87,6 +115,7 @@ memory, calls, and reads the result back out.
 | `failure_page(title)` | the diagnostics dressed as a document |
 | `title_of(source)` | the first level-one heading |
 | `add_file` / `clear_files` / `set_main` | the file map a document is compiled against |
+| `default_fonts_required` / `add_default_font` | whether the host must load the separate defaults and append each font before compiling |
 | `set_asset_url(path, url)` | accepted and ignored; typst embeds figures in both PDF and HTML output |
 | `set_today(y, m, d)` | what `datetime.today()` answers — the module has no clock, so the host hands it one |
 | `word_diff(old, new)` | the shared word-level diff, as JSON |
@@ -131,12 +160,15 @@ fetch again.
 
 **Fonts.** Typst never loads fonts from a project, but this module does: every
 font file in the map (`.ttf`, `.otf`, `.ttc`, `.otc`, under any path) is
-layered over the embedded defaults, which is what `--font-path` does for the
-binary. A family the document names and the map lacks is set in the fallback,
-warned about, and listed under `fonts` — lowercased, because that is how typst
-matches a family name, and so how a font index should be keyed. Which fonts a
-host can offer is the host's decision; the module only says which were asked
-for.
+layered over the default set, which is what `--font-path` does for the binary.
+In the compatibility build that set is embedded. In the browser mirror build,
+the host checks `default_fonts_required()`, reads adjacent `fonts.json`, checks
+each font's byte size and SHA-256, then calls `add_default_font` in manifest
+order before compiling. Those fonts survive `clear_files` and stay ahead of
+project fonts. A family the document names and the available set lacks is set
+in the fallback, warned about, and listed under `fonts` — lowercased, because
+that is how typst matches a family name and how a font index should be keyed.
+The module only says which additional fonts a document asked for.
 
 The fonts in the map are parsed once per distinct set and remembered, so a
 keystroke does not re-parse them; only the set changing does.
@@ -165,8 +197,9 @@ computes. Changes to it belong upstream first.
 The code in this repository is MIT. See [LICENSE](LICENSE).
 
 What `typst.wasm` contains is not only this code. It statically links the Typst
-compiler, which is Apache-2.0, and embeds the assets shipped by
-`typst-assets`, which are under five distinct sets of terms — the SIL Open Font
+compiler, which is Apache-2.0. The compatibility build embeds the assets
+shipped by `typst-assets`; the browser build serves the fonts separately.
+Those assets are under five distinct sets of terms — the SIL Open Font
 License 1.1 (Libertinus Serif, with Reserved Font Names), the GUST Font License
 (New Computer Modern), a separate Distribution Exception for `NewCM10-Regular`,
 a BSD-style PDFium licence (the Foxit base-14 faces), and CC0 (the ICC

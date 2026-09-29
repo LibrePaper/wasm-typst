@@ -6,6 +6,7 @@
 
 MODULE  := typst.wasm
 TARGET  := target/wasm32-unknown-unknown/release/wasm_typst.wasm
+EXTERNAL_TARGET := target/browser/wasm32-unknown-unknown/release/wasm_typst.wasm
 VERSION := $(shell grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 SOURCES := $(shell find src Cargo.toml -type f 2>/dev/null) $(shell find ../wasm-helpers/src ../wasm-helpers/document.css -type f 2>/dev/null)
 # The publishing credential (the Cloudflare token) lives sops-encrypted in
@@ -15,7 +16,7 @@ SOURCES := $(shell find src Cargo.toml -type f 2>/dev/null) $(shell find ../wasm
 KEYS    ?= ../librepaper/deploy/keys.yaml
 
 .DEFAULT_GOAL := help
-.PHONY: help build compress checksums release secrets test fmt clean
+.PHONY: help build compress checksums release mirror mirror-push secrets test fmt clean
 
 help:  ## Display this help screen
 	@printf "\033[1mAvailable commands:\033[0m\n\n"
@@ -57,6 +58,15 @@ release: checksums  ## Publish the version in Cargo.toml as a GitHub release
 		dist/$(MODULE) dist/$(MODULE).br dist/$(MODULE).gz dist/SHA256SUMS \
 		--title "$(MODULE) $(VERSION)" \
 		--notes "$$(printf 'Built from %s\n\n```\n%s\n```\n' "$$(git rev-parse --short HEAD)" "$$(cat dist/SHA256SUMS)")"
+
+mirror: $(EXTERNAL_TARGET)  ## Build and validate the external-font WASM static mirror
+	@node tools/mirror.mjs $(EXTERNAL_TARGET) mirror
+
+$(EXTERNAL_TARGET): $(SOURCES)
+	@CARGO_TARGET_DIR=target/browser cargo build --locked --no-default-features --features exports --release --target wasm32-unknown-unknown
+
+mirror-push: mirror  ## Publish the static mirror to Cloudflare Pages/Workers Assets
+	@sops exec-env $(KEYS) 'wrangler deploy --config wrangler.toml'
 
 # A target cannot export into the shell that ran make, so this opens a
 # subshell with the keys decrypted in its environment; exit it to drop them.

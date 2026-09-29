@@ -17,8 +17,9 @@ crate-type = ["cdylib", "rlib"]
 # On for this crate's own module, and off when another crate links it as a
 # library: a `#[no_mangle]` export belongs to exactly one cdylib, and two sets
 # of them do not link.
-default = ["exports"]
+default = ["exports", "embedded-fonts"]
 exports = []
+embedded-fonts = ["typst-assets/fonts"]
 
 [dependencies]
 # The shared page template, diagnostics and WebAssembly interface. A path
@@ -31,12 +32,17 @@ typst = "=0.15.1"
 typst-layout = "=0.15.1"
 typst-pdf = "=0.15.1"
 typst-html = "=0.15.1"
+ecow = "0.2"
 # Typst's own default fonts, embedded, so a document compiles here exactly as
 # it does under the typst binary: the same faces, and the maths font without
 # which maths does not compile at all.
+# Native consumers always get the stock font set, including consumers which
+# disable this crate's default features to suppress its WASM exports.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 typst-assets = { version = "=0.15.1", features = ["fonts"] }
-# Diagnostics come back from typst in its own vector type.
-ecow = "0.2"
+# In the browser build, `embedded-fonts` explicitly opts into the bundle.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+typst-assets = { version = "=0.15.1", optional = true }
 
 # As small as it can be. Thirty megabytes is what the compiler and its fonts
 # cost before compression, and every byte is fetched by someone opening a

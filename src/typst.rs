@@ -191,8 +191,13 @@ impl Fonts {
             }
             faces.len() > before
         };
+        #[cfg(any(not(target_arch = "wasm32"), feature = "embedded-fonts"))]
         for data in typst_assets::fonts() {
             push(Bytes::new(data.to_vec()));
+        }
+        #[cfg(all(target_arch = "wasm32", not(feature = "embedded-fonts")))]
+        for data in default_fonts().iter() {
+            push(data.clone());
         }
         for (name, data) in extra {
             if !push(Bytes::new(data.clone())) {
@@ -217,10 +222,10 @@ fn fonts(extra: FontFiles) -> Arc<Fonts> {
     // keystroke, and the slot remembers that set. The next document's set
     // replaces it rather than accumulating beside it.
     static LAST: Mutex<Option<(u128, Arc<Fonts>)>> = Mutex::new(None);
-    if extra.is_empty() {
+    if extra.is_empty() && cfg!(any(not(target_arch = "wasm32"), feature = "embedded-fonts")) {
         return EMBEDDED.get_or_init(|| Arc::new(Fonts::new(&[]))).clone();
     }
-    let key = typst::utils::hash128(&extra);
+    let key = typst::utils::hash128(&(default_fonts_generation(), &extra));
     let mut last = LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some((known, fonts)) = &*last {
         if *known == key {
@@ -230,6 +235,52 @@ fn fonts(extra: FontFiles) -> Arc<Fonts> {
     let fonts = Arc::new(Fonts::new(extra));
     *last = Some((key, fonts.clone()));
     fonts
+}
+
+#[cfg(all(target_arch = "wasm32", not(feature = "embedded-fonts")))]
+static DEFAULT_FONTS: OnceLock<Mutex<Vec<Bytes>>> = OnceLock::new();
+#[cfg(all(target_arch = "wasm32", not(feature = "embedded-fonts")))]
+static DEFAULT_FONTS_GENERATION: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(all(target_arch = "wasm32", not(feature = "embedded-fonts")))]
+fn default_fonts() -> Vec<Bytes> {
+    DEFAULT_FONTS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+#[cfg(all(target_arch = "wasm32", not(feature = "embedded-fonts")))]
+fn default_fonts_generation() -> usize {
+    DEFAULT_FONTS_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(any(not(target_arch = "wasm32"), feature = "embedded-fonts"))]
+fn default_fonts_generation() -> usize {
+    0
+}
+
+/// Store a default font supplied by the host in the external-font build.
+/// Returns false when the bytes contain no readable font face.
+#[cfg(all(target_arch = "wasm32", not(feature = "embedded-fonts")))]
+pub fn add_default_font(data: &[u8]) -> bool {
+    if Font::iter(Bytes::new(data.to_vec())).next().is_none() {
+        return false;
+    }
+    let mut fonts = DEFAULT_FONTS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    fonts.push(Bytes::new(data.to_vec()));
+    DEFAULT_FONTS_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    true
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "embedded-fonts"))]
+pub fn add_default_font(_: &[u8]) -> bool {
+    false
 }
 
 /// Says whether a file is a font the compiler can read.

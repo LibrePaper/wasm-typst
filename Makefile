@@ -6,14 +6,12 @@
 
 MODULE  := typst.wasm
 TARGET  := target/wasm32-unknown-unknown/release/wasm_typst.wasm
-EXTERNAL_TARGET := target/browser/wasm32-unknown-unknown/release/wasm_typst.wasm
 VERSION := $(shell grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 SOURCES := $(shell find src Cargo.toml -type f 2>/dev/null) $(shell find ../wasm-helpers/src ../wasm-helpers/document.css -type f 2>/dev/null)
-# The publishing credential (the Cloudflare token) lives sops-encrypted in
-# the application's deploy/keys.yaml, one file for every LibrePaper repo, and
-# is reached through the sibling checkout. Releasing through gh does not need
-# it; only publishing somewhere that wants a credential does.
-KEYS    ?= ../librepaper/deploy/keys.yaml
+# Shared Node publisher and encrypted S3-compatible credentials live in the
+# sibling application checkout. Both paths can be overridden by callers.
+PUBLISHER ?= ../librepaper/tools/publish-mirror.mjs
+KEYS      ?= ../librepaper/deploy/keys.yaml
 
 .DEFAULT_GOAL := help
 .PHONY: help build compress checksums release mirror mirror-push secrets test fmt clean
@@ -59,14 +57,11 @@ release: checksums  ## Publish the version in Cargo.toml as a GitHub release
 		--title "$(MODULE) $(VERSION)" \
 		--notes "$$(printf 'Built from %s\n\n```\n%s\n```\n' "$$(git rev-parse --short HEAD)" "$$(cat dist/SHA256SUMS)")"
 
-mirror: $(EXTERNAL_TARGET)  ## Build and validate the external-font WASM static mirror
-	@node tools/mirror.mjs $(EXTERNAL_TARGET) mirror
+mirror: dist/$(MODULE) tools/mirror.mjs LICENSE NOTICE NOTICE.upstream  ## Build the content-addressed WASM mirror
+	@node tools/mirror.mjs $< mirror
 
-$(EXTERNAL_TARGET): $(SOURCES)
-	@CARGO_TARGET_DIR=target/browser cargo build --locked --no-default-features --features exports --release --target wasm32-unknown-unknown
-
-mirror-push: mirror  ## Publish the static mirror to Cloudflare Pages/Workers Assets
-	@sops exec-env $(KEYS) 'wrangler deploy --config wrangler.toml'
+mirror-push: mirror  ## Publish the WASM mirror to the configured S3-compatible bucket
+	@node "$(PUBLISHER)" --dir mirror --prefix typst
 
 # A target cannot export into the shell that ran make, so this opens a
 # subshell with the keys decrypted in its environment; exit it to drop them.

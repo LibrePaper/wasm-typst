@@ -1,4 +1,4 @@
-//! The nineteen exports a host calls, and nothing else.
+//! The WebAssembly exports a host calls, and nothing else.
 //!
 //! Each one wraps the shared implementation in `wasm_helpers::abi`.
 //! They are written out rather than generated because a `#[no_mangle]` export
@@ -150,34 +150,6 @@ pub unsafe extern "C" fn add_file(
 #[no_mangle]
 pub extern "C" fn clear_files() {
     abi::clear_files()
-}
-
-/// Whether the host must load the separate default font set before compiling.
-#[no_mangle]
-pub extern "C" fn default_fonts_required() -> u32 {
-    if cfg!(all(target_arch = "wasm32", not(feature = "embedded-fonts"))) {
-        1
-    } else {
-        0
-    }
-}
-
-/// Add one separately served default font. Returns 0 when accepted and 1 when
-/// its bytes contain no readable font face. Defaults survive `clear_files`.
-///
-/// # Safety
-/// `font` and `len` must describe bytes readable in this module's memory.
-#[no_mangle]
-pub unsafe extern "C" fn add_default_font(font: *const u8, len: usize) -> u32 {
-    if font.is_null() || len == 0 {
-        return 1;
-    }
-    let bytes = std::slice::from_raw_parts(font, len);
-    if crate::typst::add_default_font(bytes) {
-        0
-    } else {
-        1
-    }
 }
 
 /// # Safety

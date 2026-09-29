@@ -25,6 +25,5 @@ jobs:
       - run: cargo test --locked
       - run: cargo build --locked --release --target wasm32-unknown-unknown
       - run: ls -l target/wasm32-unknown-unknown/release/*.wasm
-      # The separately served compiler must stay below Cloudflare's static
-      # asset limit, and its manifest must describe the pinned fonts exactly.
+      # Build the content-addressed mirror from the embedded-font module.
       - run: make mirror

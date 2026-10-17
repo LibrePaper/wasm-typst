@@ -816,12 +816,26 @@ mod tests {
     // A path typst rejects must give no completions, not abort the module.
     #[test]
     fn completion_of_an_invalid_path_is_none() {
+        let source = "#let x = 1\n#x";
+        // The same request with a valid path completes, so the cases below
+        // fail on the path and not on the offset.
+        assert!(complete(
+            source,
+            "main.typ",
+            source.len(),
+            true,
+            &[],
+            &no_files,
+            NO_FONTS,
+            None
+        )
+        .is_some());
         for path in ["../escape.typ", "a/../../b.typ"] {
             assert!(
                 complete(
-                    "#let x = 1\n#x",
+                    source,
                     path,
-                    14,
+                    source.len(),
                     true,
                     &[],
                     &no_files,

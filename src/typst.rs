@@ -739,9 +739,19 @@ pub fn complete(
     if offset > source.len() || !source.is_char_boundary(offset) {
         return None;
     }
+    // main_id panics on a path typst rejects, and a panic aborts the module.
+    if !path.is_empty() && VirtualPath::new(path).is_err() {
+        return None;
+    }
+    // One read of the last document picks both the library, which must match
+    // the target it compiled for, and the labels.
+    let last = LAST_DOCUMENT.with(|last| last.borrow_mut().take());
     let world = DocumentWorld {
         main: Source::new(main_id(path), source.to_string()),
-        library: library(),
+        library: match last {
+            Some(LastDocument::Html(_)) => html_library(),
+            _ => library(),
+        },
         files,
         fonts: self::fonts(fonts),
         today: today.and_then(|t| Datetime::from_ymd(t.year, t.month, t.day)),
@@ -754,10 +764,15 @@ pub fn complete(
             })
             .collect(),
     };
-    let answer = LAST_DOCUMENT.with(|last| {
-        let last = last.borrow();
-        typst_ide::autocomplete(&world, last.as_ref().map(LastDocument::as_output), &world.main, offset, explicit)
-    });
+    let answer = typst_ide::autocomplete(
+        &world,
+        last.as_ref().map(LastDocument::as_output),
+        &world.main,
+        offset,
+        explicit,
+    );
+    // Put the document back for the next request.
+    LAST_DOCUMENT.with(|slot| *slot.borrow_mut() = last);
     typst::comemo::evict(1);
     answer
 }
@@ -796,6 +811,18 @@ mod tests {
         .compiled
         .output
         .is_none());
+    }
+
+    // A path typst rejects must give no completions, not abort the module.
+    #[test]
+    fn completion_of_an_invalid_path_is_none() {
+        for path in ["../escape.typ", "a/../../b.typ"] {
+            assert!(
+                complete("#let x = 1\n#x", path, 14, true, &[], &no_files, NO_FONTS, None)
+                    .is_none(),
+                "{path}"
+            );
+        }
     }
 
     #[test]

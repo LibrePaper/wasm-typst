@@ -115,6 +115,7 @@ memory, calls, and reads the result back out.
 | `set_asset_url(path, url)` | accepted and ignored; typst embeds figures in both PDF and HTML output |
 | `set_today(y, m, d)` | what `datetime.today()` answers — the module has no clock, so the host hands it one |
 | `word_diff(old, new)` | the shared word-level diff, as JSON |
+| `complete(request)` | autocomplete at a cursor; the request is JSON `{path, source, offset, explicit, files}` with a UTF-8 byte `offset`, the answer `{from, options}` or `null`; labels come from the last compile |
 | `needs` / `needs_ptr` | what the last compile could not find — packages and font families — as JSON |
 
 A compile leaves two results side by side: the document where `output_ptr`

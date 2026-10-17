@@ -3,7 +3,7 @@
 //! Each one wraps the shared implementation in `wasm_helpers::abi`.
 //! They are written out rather than generated because a `#[no_mangle]` export
 //! has to be compiled into the `cdylib` that ships and cannot be inherited from
-//! a dependency -- and because eighteen signatures you can read beat a macro
+//! a dependency -- and because nineteen signatures you can read beat a macro
 //! that writes them and reports its errors somewhere else.
 //!
 //! Two of them are this module's alone. `needs` and `needs_ptr` say what the
@@ -61,8 +61,98 @@ fn render_html(source: &str, title: &str) -> Compiled {
     outcome.compiled
 }
 
+/// Runs one completion request and renders the answer as JSON text.
+fn completions(request: &str) -> String {
+    use serde_json::{json, Value};
+    use typst_ide::CompletionKind;
+
+    let Ok(request) = serde_json::from_str::<Value>(request) else {
+        return "null".into();
+    };
+    let (Some(source), Some(offset)) = (
+        request["source"].as_str(),
+        request["offset"].as_u64().map(|offset| offset as usize),
+    ) else {
+        return "null".into();
+    };
+    let path = request["path"].as_str().unwrap_or("");
+    let explicit = request["explicit"].as_bool().unwrap_or(false);
+    let listed: Vec<String> = request["files"]
+        .as_array()
+        .map(|files| {
+            files
+                .iter()
+                .filter_map(|file| file.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let today = abi::today().map(|(year, month, day)| crate::typst::Today {
+        year,
+        month: month as u8,
+        day: day as u8,
+    });
+    let fonts: Vec<(String, Vec<u8>)> = abi::files()
+        .into_iter()
+        .filter(|(path, _)| crate::typst::is_font(path))
+        .collect();
+    let Some((from, options)) = crate::typst::complete(
+        source,
+        path,
+        offset,
+        explicit,
+        &listed,
+        &|path| abi::file(path),
+        &fonts,
+        today,
+    ) else {
+        return "null".into();
+    };
+    let options: Vec<Value> = options
+        .into_iter()
+        .map(|option| {
+            let kind = match option.kind {
+                CompletionKind::Syntax => "syntax",
+                CompletionKind::Func => "func",
+                CompletionKind::Type => "type",
+                CompletionKind::Param => "param",
+                CompletionKind::Constant => "constant",
+                CompletionKind::Path => "path",
+                CompletionKind::Package => "package",
+                CompletionKind::Label => "label",
+                CompletionKind::Font => "font",
+                CompletionKind::Symbol(_) => "symbol",
+            };
+            json!({
+                "label": option.label.as_str(),
+                "kind": kind,
+                "detail": option.detail.as_deref(),
+                "apply": option.apply.as_deref(),
+            })
+        })
+        .collect();
+    json!({ "from": from, "options": options }).to_string()
+}
+
 fn heading(source: &str) -> String {
     crate::typst::title_of(source)
+}
+
+/// Completions at a cursor, as JSON, for the editor's autocomplete.
+///
+/// The request is UTF-8 JSON: `{"path": "main.typ", "source": "<the whole
+/// file>", "offset": 123, "explicit": false, "files": ["main.typ", "a.png"]}`.
+/// `offset` counts UTF-8 bytes into `source`, and `files` is every project
+/// path, for path completion. The other files a document reads are the ones the
+/// host already gave `add_file`. The answer is `{"from": <byte offset>,
+/// "options": [{"label", "kind", "detail", "apply"}]}`, or `null` when there is
+/// nothing to complete; `apply` is typst's snippet text, `${name}` placeholders
+/// included. Labels are offered once a compile has produced a document.
+///
+/// # Safety
+/// The pointer and length must describe UTF-8 written into this module.
+#[no_mangle]
+pub unsafe extern "C" fn complete(request: *const u8, request_len: usize) -> usize {
+    abi::answer(Ok(completions(abi::text_at(request, request_len))))
 }
 
 #[no_mangle]

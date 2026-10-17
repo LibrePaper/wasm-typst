@@ -21,6 +21,7 @@
 //! document with everything in reach compiles the same way here as under the
 //! `typst` binary.
 
+use std::cell::RefCell;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -33,6 +34,7 @@ use typst::syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Library, LibraryExt, World, WorldExt};
+use typst_ide::{Completion, IdeWorld};
 use typst_layout::PagedDocument;
 
 use crate::diagnostic::{Compiled, Diagnostic, RenderedDocument, Severity};
@@ -276,6 +278,12 @@ fn html_library() -> &'static LazyHash<Library> {
     })
 }
 
+thread_local! {
+    /// The last paged document that compiled. The module runs on one thread,
+    /// so a thread local is a global with no lock.
+    static LAST_DOCUMENT: RefCell<Option<PagedDocument>> = const { RefCell::new(None) };
+}
+
 /// One document, the files it may import, its fonts, and the date.
 struct DocumentWorld<'a> {
     main: Source,
@@ -285,6 +293,9 @@ struct DocumentWorld<'a> {
     today: Option<Datetime>,
     /// The packages the compiler asked for and the reader did not have.
     missing: Mutex<Vec<Package>>,
+    /// The project paths the host listed, for path completion. Empty for a
+    /// compile, which never asks.
+    listed: Vec<FileId>,
 }
 
 impl DocumentWorld<'_> {
@@ -317,6 +328,17 @@ impl DocumentWorld<'_> {
                 Err(FileError::Package(PackageError::NotFound(spec.clone())))
             }
         }
+    }
+}
+
+impl IdeWorld for DocumentWorld<'_> {
+    fn upcast(&self) -> &dyn World {
+        self
+    }
+
+    // Packages stay unlisted: the module cannot fetch the registry index.
+    fn files(&self) -> Vec<FileId> {
+        self.listed.clone()
     }
 }
 
@@ -372,6 +394,7 @@ pub fn compile_html(
         fonts: self::fonts(fonts),
         today: today.and_then(|t| Datetime::from_ymd(t.year, t.month, t.day)),
         missing: Mutex::new(Vec::new()),
+        listed: Vec::new(),
     };
 
     let compiled = typst::compile::<typst_html::HtmlDocument>(&world);
@@ -506,18 +529,25 @@ pub fn compile_pdf(
         fonts: self::fonts(fonts),
         today: today.and_then(|t| Datetime::from_ymd(t.year, t.month, t.day)),
         missing: Mutex::new(Vec::new()),
+        listed: Vec::new(),
     };
 
     let compiled = typst::compile::<PagedDocument>(&world);
     let mut diagnostics = describe(&world, &compiled.warnings);
     let output = match compiled.output {
-        Ok(document) => match typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default()) {
-            Ok(pdf) => Some(RenderedDocument::Pdf(pdf)),
-            Err(errors) => {
-                diagnostics.extend(describe(&world, &errors));
-                None
+        Ok(document) => {
+            let pdf = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default());
+            // Label and reference completion reads the last document that
+            // compiled, so a document that is broken mid-edit still completes.
+            LAST_DOCUMENT.with(|last| *last.borrow_mut() = Some(document));
+            match pdf {
+                Ok(pdf) => Some(RenderedDocument::Pdf(pdf)),
+                Err(errors) => {
+                    diagnostics.extend(describe(&world, &errors));
+                    None
+                }
             }
-        },
+        }
         Err(errors) => {
             diagnostics.extend(describe(&world, &errors));
             None
@@ -846,4 +876,47 @@ mod tests {
         assert_eq!(local.url(), None);
         assert!(Needs::default().is_empty());
     }
+}
+
+/// Completions at a byte offset of `source`, which is the file at `path`.
+/// `listed` is every project path, for path completion. Labels come from the
+/// last document that compiled, if there is one. Returns where the completed
+/// text starts and the options, or `None` when there is nothing to offer.
+#[allow(clippy::too_many_arguments)]
+pub fn complete(
+    source: &str,
+    path: &str,
+    offset: usize,
+    explicit: bool,
+    listed: &[String],
+    files: Files,
+    fonts: FontFiles,
+    today: Option<Today>,
+) -> Option<(usize, Vec<Completion>)> {
+    // A host offset can land inside a character or past the end; typst-ide
+    // would panic on it.
+    if offset > source.len() || !source.is_char_boundary(offset) {
+        return None;
+    }
+    let world = DocumentWorld {
+        main: Source::new(main_id(path), source.to_string()),
+        library: library(),
+        files,
+        fonts: self::fonts(fonts),
+        today: today.and_then(|t| Datetime::from_ymd(t.year, t.month, t.day)),
+        missing: Mutex::new(Vec::new()),
+        listed: listed
+            .iter()
+            .filter_map(|name| {
+                let path = VirtualPath::new(name).ok()?;
+                Some(RootedPath::new(VirtualRoot::Project, path).intern())
+            })
+            .collect(),
+    };
+    let answer = LAST_DOCUMENT.with(|last| {
+        let last = last.borrow();
+        typst_ide::autocomplete(&world, last.as_ref(), &world.main, offset, explicit)
+    });
+    typst::comemo::evict(1);
+    answer
 }

@@ -818,8 +818,17 @@ mod tests {
     fn completion_of_an_invalid_path_is_none() {
         for path in ["../escape.typ", "a/../../b.typ"] {
             assert!(
-                complete("#let x = 1\n#x", path, 14, true, &[], &no_files, NO_FONTS, None)
-                    .is_none(),
+                complete(
+                    "#let x = 1\n#x",
+                    path,
+                    14,
+                    true,
+                    &[],
+                    &no_files,
+                    NO_FONTS,
+                    None
+                )
+                .is_none(),
                 "{path}"
             );
         }

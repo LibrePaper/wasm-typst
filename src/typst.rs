@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use typst::diag::{
     FileError, FileResult, PackageError, Severity as TypstSeverity, SourceDiagnostic,
 };
-use typst::foundations::{Bytes, Datetime, Duration};
+use typst::foundations::{Bytes, Datetime, Duration, Output};
 use typst::syntax::package::PackageSpec;
 use typst::syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot};
 use typst::text::{Font, FontBook};
@@ -279,9 +279,24 @@ fn html_library() -> &'static LazyHash<Library> {
 }
 
 thread_local! {
-    /// The last paged document that compiled. The module runs on one thread,
-    /// so a thread local is a global with no lock.
-    static LAST_DOCUMENT: RefCell<Option<PagedDocument>> = const { RefCell::new(None) };
+    /// The last document that compiled, of either target. The module runs on
+    /// one thread, so a thread local is a global with no lock.
+    static LAST_DOCUMENT: RefCell<Option<LastDocument>> = const { RefCell::new(None) };
+}
+
+/// A compiled document of the target it was compiled for.
+enum LastDocument {
+    Paged(PagedDocument),
+    Html(typst_html::HtmlDocument),
+}
+
+impl LastDocument {
+    fn as_output(&self) -> &dyn Output {
+        match self {
+            Self::Paged(document) => document,
+            Self::Html(document) => document,
+        }
+    }
 }
 
 /// One document, the files it may import, its fonts, and the date.
@@ -400,13 +415,19 @@ pub fn compile_html(
     let compiled = typst::compile::<typst_html::HtmlDocument>(&world);
     let mut diagnostics = describe(&world, &compiled.warnings);
     let output = match compiled.output {
-        Ok(document) => match typst_html::html(&document, &typst_html::HtmlOptions::default()) {
-            Ok(html) => Some(RenderedDocument::Html(html)),
-            Err(errors) => {
-                diagnostics.extend(describe(&world, &errors));
-                None
+        Ok(document) => {
+            let html = typst_html::html(&document, &typst_html::HtmlOptions::default());
+            // Label and reference completion reads the last document that
+            // compiled, so a document that is broken mid-edit still completes.
+            LAST_DOCUMENT.with(|last| *last.borrow_mut() = Some(LastDocument::Html(document)));
+            match html {
+                Ok(html) => Some(RenderedDocument::Html(html)),
+                Err(errors) => {
+                    diagnostics.extend(describe(&world, &errors));
+                    None
+                }
             }
-        },
+        }
         Err(errors) => {
             diagnostics.extend(describe(&world, &errors));
             None
@@ -539,7 +560,7 @@ pub fn compile_pdf(
             let pdf = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default());
             // Label and reference completion reads the last document that
             // compiled, so a document that is broken mid-edit still completes.
-            LAST_DOCUMENT.with(|last| *last.borrow_mut() = Some(document));
+            LAST_DOCUMENT.with(|last| *last.borrow_mut() = Some(LastDocument::Paged(document)));
             match pdf {
                 Ok(pdf) => Some(RenderedDocument::Pdf(pdf)),
                 Err(errors) => {
@@ -696,6 +717,49 @@ pub fn is_typst(name: &str) -> bool {
 /// none was given: typst has no metadata this side can see without compiling.
 pub fn title_of(source: &str) -> String {
     page::first_heading(source, '=')
+}
+
+/// Completions at a byte offset of `source`, which is the file at `path`.
+/// `listed` is every project path, for path completion. Labels come from the
+/// last document that compiled, of either target, if there is one. Returns where the completed
+/// text starts and the options, or `None` when there is nothing to offer.
+#[allow(clippy::too_many_arguments)]
+pub fn complete(
+    source: &str,
+    path: &str,
+    offset: usize,
+    explicit: bool,
+    listed: &[String],
+    files: Files,
+    fonts: FontFiles,
+    today: Option<Today>,
+) -> Option<(usize, Vec<Completion>)> {
+    // A host offset can land inside a character or past the end; typst-ide
+    // would panic on it.
+    if offset > source.len() || !source.is_char_boundary(offset) {
+        return None;
+    }
+    let world = DocumentWorld {
+        main: Source::new(main_id(path), source.to_string()),
+        library: library(),
+        files,
+        fonts: self::fonts(fonts),
+        today: today.and_then(|t| Datetime::from_ymd(t.year, t.month, t.day)),
+        missing: Mutex::new(Vec::new()),
+        listed: listed
+            .iter()
+            .filter_map(|name| {
+                let path = VirtualPath::new(name).ok()?;
+                Some(RootedPath::new(VirtualRoot::Project, path).intern())
+            })
+            .collect(),
+    };
+    let answer = LAST_DOCUMENT.with(|last| {
+        let last = last.borrow();
+        typst_ide::autocomplete(&world, last.as_ref().map(LastDocument::as_output), &world.main, offset, explicit)
+    });
+    typst::comemo::evict(1);
+    answer
 }
 
 #[cfg(test)]
@@ -876,47 +940,4 @@ mod tests {
         assert_eq!(local.url(), None);
         assert!(Needs::default().is_empty());
     }
-}
-
-/// Completions at a byte offset of `source`, which is the file at `path`.
-/// `listed` is every project path, for path completion. Labels come from the
-/// last document that compiled, if there is one. Returns where the completed
-/// text starts and the options, or `None` when there is nothing to offer.
-#[allow(clippy::too_many_arguments)]
-pub fn complete(
-    source: &str,
-    path: &str,
-    offset: usize,
-    explicit: bool,
-    listed: &[String],
-    files: Files,
-    fonts: FontFiles,
-    today: Option<Today>,
-) -> Option<(usize, Vec<Completion>)> {
-    // A host offset can land inside a character or past the end; typst-ide
-    // would panic on it.
-    if offset > source.len() || !source.is_char_boundary(offset) {
-        return None;
-    }
-    let world = DocumentWorld {
-        main: Source::new(main_id(path), source.to_string()),
-        library: library(),
-        files,
-        fonts: self::fonts(fonts),
-        today: today.and_then(|t| Datetime::from_ymd(t.year, t.month, t.day)),
-        missing: Mutex::new(Vec::new()),
-        listed: listed
-            .iter()
-            .filter_map(|name| {
-                let path = VirtualPath::new(name).ok()?;
-                Some(RootedPath::new(VirtualRoot::Project, path).intern())
-            })
-            .collect(),
-    };
-    let answer = LAST_DOCUMENT.with(|last| {
-        let last = last.borrow();
-        typst_ide::autocomplete(&world, last.as_ref(), &world.main, offset, explicit)
-    });
-    typst::comemo::evict(1);
-    answer
 }

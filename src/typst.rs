@@ -773,7 +773,9 @@ pub fn complete(
     );
     // Put the document back for the next request.
     LAST_DOCUMENT.with(|slot| *slot.borrow_mut() = last);
-    typst::comemo::evict(1);
+    // Completion does not evict. The compile path's evict bounds memory, and
+    // evicting here would age out the last compile's cache, which the next
+    // compile needs.
     answer
 }
 

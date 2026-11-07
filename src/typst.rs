@@ -777,6 +777,226 @@ pub fn complete(
     answer
 }
 
+/// One outline entry found by [`symbols`]. Offsets are UTF-8 byte offsets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Symbol {
+    pub name: String,
+    /// `"heading"`, `"label"`, `"function"` or `"variable"`.
+    pub kind: &'static str,
+    pub from: usize,
+    pub to: usize,
+    pub name_from: usize,
+    pub name_to: usize,
+    /// The heading level; `None` for everything else.
+    pub depth: Option<usize>,
+}
+
+/// One foldable range found by [`folding`]. Offsets are UTF-8 byte offsets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fold {
+    pub from: usize,
+    pub to: usize,
+    /// `"region"`, `"comment"` or `"heading"`.
+    pub kind: &'static str,
+}
+
+/// The outline of a source file, flat and in source order: headings, labels
+/// and top-level `#let` bindings. Parse only; nothing is compiled.
+pub fn symbols(source: &str) -> Vec<Symbol> {
+    use typst::syntax::{ast, parse, LinkedNode, SyntaxKind};
+
+    fn walk(node: &LinkedNode, source: &str, nested: bool, out: &mut Vec<Symbol>) {
+        let range = node.range();
+        let mut nested = nested;
+        match node.kind() {
+            SyntaxKind::Heading => {
+                if let Some(heading) = node.get().cast::<ast::Heading>() {
+                    let body = node
+                        .children()
+                        .find(|child| child.kind() == SyntaxKind::Markup);
+                    let body_range = body
+                        .map(|body| body.range())
+                        .unwrap_or(range.end..range.end);
+                    out.push(Symbol {
+                        name: source[body_range.clone()].trim().to_string(),
+                        kind: "heading",
+                        from: range.start,
+                        to: range.end,
+                        name_from: body_range.start,
+                        name_to: body_range.end,
+                        depth: Some(heading.depth().get()),
+                    });
+                }
+            }
+            SyntaxKind::Label => {
+                let text = &source[range.clone()];
+                if text.len() >= 2 && text.starts_with('<') && text.ends_with('>') {
+                    out.push(Symbol {
+                        name: text[1..text.len() - 1].to_string(),
+                        kind: "label",
+                        from: range.start,
+                        to: range.end,
+                        name_from: range.start + 1,
+                        name_to: range.end - 1,
+                        depth: None,
+                    });
+                }
+            }
+            SyntaxKind::LetBinding if !nested => {
+                if let Some(binding) = node.get().cast::<ast::LetBinding>() {
+                    let kind = match binding.kind() {
+                        ast::LetBindingKind::Closure(_) => Some("function"),
+                        ast::LetBindingKind::Normal(ast::Pattern::Normal(ast::Expr::Ident(
+                            _,
+                        ))) => Some("variable"),
+                        _ => None,
+                    };
+                    if let Some(kind) = kind {
+                        // `let f(x) = ..` keeps the name inside the closure
+                        // node; `let a = ..` and `let f = x => ..` keep it
+                        // directly under the binding.
+                        let named = node
+                            .children()
+                            .find(|child| child.kind() == SyntaxKind::Closure)
+                            .and_then(|closure| closure.children().next())
+                            .filter(|first| first.kind() == SyntaxKind::Ident);
+                        let ident = named.or_else(|| {
+                            node.children().find(|child| child.kind() == SyntaxKind::Ident)
+                        });
+                        if let Some(ident) = ident {
+                            let name = ident.range();
+                            out.push(Symbol {
+                                name: source[name.clone()].to_string(),
+                                kind,
+                                from: range.start,
+                                to: range.end,
+                                name_from: name.start,
+                                name_to: name.end,
+                                depth: None,
+                            });
+                        }
+                    }
+                }
+            }
+            SyntaxKind::CodeBlock | SyntaxKind::ContentBlock | SyntaxKind::Closure => {
+                nested = true;
+            }
+            _ => {}
+        }
+        for child in node.children() {
+            walk(&child, source, nested, out);
+        }
+    }
+
+    let root = parse(source);
+    let mut out = Vec::new();
+    walk(&LinkedNode::new(&root), source, false, &mut out);
+    out
+}
+
+/// The foldable ranges of a source file, sorted by start: delimited regions,
+/// block comments and heading sections, each only when it spans lines. Parse
+/// only; nothing is compiled.
+pub fn folding(source: &str) -> Vec<Fold> {
+    use typst::syntax::{ast, parse, LinkedNode, SyntaxKind};
+
+    fn is_open(kind: SyntaxKind) -> bool {
+        matches!(
+            kind,
+            SyntaxKind::LeftParen | SyntaxKind::LeftBrace | SyntaxKind::LeftBracket
+        )
+    }
+    fn is_close(kind: SyntaxKind) -> bool {
+        matches!(
+            kind,
+            SyntaxKind::RightParen | SyntaxKind::RightBrace | SyntaxKind::RightBracket
+        )
+    }
+
+    fn walk(node: &LinkedNode, source: &str, out: &mut Vec<Fold>) {
+        let range = node.range();
+        let kind = node.kind();
+        let children: Vec<LinkedNode> = node.children().collect();
+        let mut push = |from: usize, to: usize, kind: &'static str| {
+            if from <= to && source[from..to].contains('\n') {
+                out.push(Fold { from, to, kind });
+            }
+        };
+        match kind {
+            SyntaxKind::CodeBlock
+            | SyntaxKind::ContentBlock
+            | SyntaxKind::Args
+            | SyntaxKind::Array
+            | SyntaxKind::Dict => {
+                // `Args` may start with a bare content block and have no
+                // parentheses of its own; that block folds as itself.
+                let open = children.first().filter(|first| is_open(first.kind()));
+                let close = children.iter().rposition(|child| is_close(child.kind()));
+                if let (Some(open), Some(close)) = (open, close) {
+                    if close > 0 {
+                        push(open.range().end, children[close].range().start, "region");
+                    }
+                }
+            }
+            SyntaxKind::Raw => {
+                if let (Some(first), Some(last)) = (children.first(), children.last()) {
+                    if children.len() > 1
+                        && first.kind() == SyntaxKind::RawDelim
+                        && last.kind() == SyntaxKind::RawDelim
+                    {
+                        push(first.range().end, last.range().start, "region");
+                    }
+                }
+            }
+            SyntaxKind::Equation => {
+                if let (Some(first), Some(last)) = (children.first(), children.last()) {
+                    if children.len() > 1
+                        && first.kind() == SyntaxKind::Dollar
+                        && last.kind() == SyntaxKind::Dollar
+                    {
+                        push(first.range().end, last.range().start, "region");
+                    }
+                }
+            }
+            SyntaxKind::BlockComment => {
+                let text = &source[range.clone()];
+                if text.len() >= 4 && text.starts_with("/*") && text.ends_with("*/") {
+                    push(range.start + 2, range.end - 2, "comment");
+                }
+            }
+            SyntaxKind::Markup if node.parent().is_none() => {
+                let headings: Vec<(usize, usize, usize)> = children
+                    .iter()
+                    .filter(|child| child.kind() == SyntaxKind::Heading)
+                    .filter_map(|child| {
+                        let depth = child.get().cast::<ast::Heading>()?.depth().get();
+                        let range = child.range();
+                        Some((range.start, range.end, depth))
+                    })
+                    .collect();
+                for (index, &(_, end, depth)) in headings.iter().enumerate() {
+                    let stop = headings[index + 1..]
+                        .iter()
+                        .find(|next| next.2 <= depth)
+                        .map_or(source.len(), |next| next.0);
+                    let to = end + source[end..stop].trim_end().len();
+                    push(end, to, "heading");
+                }
+            }
+            _ => {}
+        }
+        for child in &children {
+            walk(child, source, out);
+        }
+    }
+
+    let root = parse(source);
+    let mut out = Vec::new();
+    walk(&LinkedNode::new(&root), source, &mut out);
+    out.sort_by_key(|fold| fold.from);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -989,5 +1209,80 @@ mod tests {
         };
         assert_eq!(local.url(), None);
         assert!(Needs::default().is_empty());
+    }
+
+    fn sym<'a>(all: &'a [Symbol], kind: &str, name: &str) -> &'a Symbol {
+        all.iter()
+            .find(|symbol| symbol.kind == kind && symbol.name == name)
+            .unwrap_or_else(|| panic!("no {kind} {name}: {all:?}"))
+    }
+
+    #[test]
+    fn symbols_headings_have_depth_and_name() {
+        let source = "= Intro\ntext\n=== Deep *one*\n";
+        let all = symbols(source);
+        let intro = sym(&all, "heading", "Intro");
+        assert_eq!(intro.depth, Some(1));
+        assert_eq!(&source[intro.name_from..intro.name_to].trim(), &"Intro");
+        assert_eq!(intro.from, 0);
+        let deep = sym(&all, "heading", "Deep *one*");
+        assert_eq!(deep.depth, Some(3));
+    }
+
+    #[test]
+    fn symbols_label_range_excludes_brackets() {
+        let source = "é = A <sec:a>\n";
+        let all = symbols(source);
+        let label = sym(&all, "label", "sec:a");
+        assert_eq!(&source[label.name_from..label.name_to], "sec:a");
+        assert_eq!(&source[label.from..label.to], "<sec:a>");
+        assert_eq!(label.depth, None);
+    }
+
+    #[test]
+    fn symbols_top_level_lets_only() {
+        let source = "#let f(x) = x\n#let a = 1\n#let (p, q) = (1, 2)\n#{ let hidden = 1 }\n#let g = x => x\n";
+        let all = symbols(source);
+        let f = sym(&all, "function", "f");
+        assert_eq!(&source[f.name_from..f.name_to], "f");
+        sym(&all, "variable", "a");
+        sym(&all, "function", "g");
+        assert!(all.iter().all(|symbol| symbol.name != "hidden"));
+        assert!(all.iter().all(|symbol| symbol.name != "p"));
+        assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn folding_multiline_content_and_code_blocks() {
+        let source = "é #figure[\n  body\n]\n#{\n  let x = 1\n}\n#[one line]\n";
+        let folds = folding(source);
+        let regions: Vec<&str> = folds
+            .iter()
+            .filter(|fold| fold.kind == "region")
+            .map(|fold| &source[fold.from..fold.to])
+            .collect();
+        assert_eq!(regions, vec!["\n  body\n", "\n  let x = 1\n"]);
+    }
+
+    #[test]
+    fn folding_block_comment_and_raw() {
+        let source = "/* a\nb */\n```py\nx = 1\n```\n";
+        let folds = folding(source);
+        let comment = folds.iter().find(|fold| fold.kind == "comment").unwrap();
+        assert_eq!(&source[comment.from..comment.to], " a\nb ");
+        let raw = folds.iter().find(|fold| fold.kind == "region").unwrap();
+        assert_eq!(&source[raw.from..raw.to], "py\nx = 1\n");
+    }
+
+    #[test]
+    fn folding_heading_sections() {
+        let source = "= A\ntext\n\n== B\nmore\n\n= C\nlast\n";
+        let folds = folding(source);
+        let sections: Vec<&str> = folds
+            .iter()
+            .filter(|fold| fold.kind == "heading")
+            .map(|fold| &source[fold.from..fold.to])
+            .collect();
+        assert_eq!(sections, vec!["\ntext\n\n== B\nmore", "\nmore", "\nlast"]);
     }
 }

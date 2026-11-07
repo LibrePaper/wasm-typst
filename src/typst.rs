@@ -846,9 +846,13 @@ pub fn symbols(source: &str) -> Vec<Symbol> {
                 if let Some(binding) = node.get().cast::<ast::LetBinding>() {
                     let kind = match binding.kind() {
                         ast::LetBindingKind::Closure(_) => Some("function"),
-                        ast::LetBindingKind::Normal(ast::Pattern::Normal(ast::Expr::Ident(
-                            _,
-                        ))) => Some("variable"),
+                        // `let g = x => x` binds a closure value: a function too.
+                        ast::LetBindingKind::Normal(ast::Pattern::Normal(ast::Expr::Ident(_))) => {
+                            Some(match binding.init() {
+                                Some(ast::Expr::Closure(_)) => "function",
+                                _ => "variable",
+                            })
+                        }
                         _ => None,
                     };
                     if let Some(kind) = kind {
@@ -861,7 +865,8 @@ pub fn symbols(source: &str) -> Vec<Symbol> {
                             .and_then(|closure| closure.children().next())
                             .filter(|first| first.kind() == SyntaxKind::Ident);
                         let ident = named.or_else(|| {
-                            node.children().find(|child| child.kind() == SyntaxKind::Ident)
+                            node.children()
+                                .find(|child| child.kind() == SyntaxKind::Ident)
                         });
                         if let Some(ident) = ident {
                             let name = ident.range();

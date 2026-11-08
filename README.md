@@ -136,8 +136,6 @@ memory, calls, and reads the result back out.
 | `set_today(y, m, d)` | what `datetime.today()` answers — the module has no clock, so the host hands it one |
 | `word_diff(old, new)` | the shared word-level diff, as JSON |
 | `complete(request)` | autocomplete at a cursor; the request is JSON `{path, source, offset, explicit, files}` with a UTF-8 byte `offset`, the answer `{from, options}` or `null`; labels come from the last compile |
-| `symbols(request)` | the outline of a file, parse only; the request is JSON `{path, source}`, the answer `{symbols: [{name, kind, from, to, name_from, name_to, depth}]}` (flat, source order, UTF-8 byte offsets) or `null` |
-| `folding(request)` | the foldable ranges of a file, parse only; same request, the answer `{ranges: [{from, to, kind}]}` with kind `region`, `comment` or `heading`, or `null` |
 | `needs` / `needs_ptr` | what the last compile could not find — packages and font families — as JSON |
 
 A compile leaves two results side by side: the document where `output_ptr`

@@ -2759,7 +2759,7 @@ source = "git+https://github.com/LibrePaper/wasm-helpers?tag=v0.1.1#29aeedcca6f8
 
 [[package]]
 name = "wasm-typst"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ecow",
  "serde_json",

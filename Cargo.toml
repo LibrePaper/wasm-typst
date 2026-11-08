@@ -1,7 +1,7 @@
 # The typst compiler, as a WebAssembly module.
 [package]
 name = "wasm-typst"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "MIT"
 # Never goes to crates.io: these are consumed by path while the repositories
@@ -38,11 +38,11 @@ ecow = "0.2"
 # consumers render with the same faces and maths support.
 typst-assets = { version = "=0.15.1", features = ["fonts"] }
 
-# As small as it can be. Thirty megabytes is what the compiler and its fonts
-# cost before compression, and every byte is fetched by someone opening a
-# document.
+# Built for speed rather than size. Size (`z`) saved about 1 MB of brotli and
+# 2 MB of gzip download, fetched once and then cached, and cost about a
+# third of every compile, which is paid on every keystroke.
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const modulePath = path.resolve(process.argv[2] ?? path.join(root, 'dist', 'typst.wasm'));
 const mirror = path.resolve(process.argv[3] ?? path.join(root, 'mirror'));
+const syntaxPath = path.resolve(process.argv[4] ?? path.join(root, 'dist', 'typst-syntax.wasm'));
 
 function digest(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -20,6 +21,11 @@ for (const name of ['memory', 'alloc', 'dealloc', 'compile', 'compile_html', 'ou
 if ('default_fonts_required' in exports || 'add_default_font' in exports) {
   throw new Error('WASM module uses the obsolete external-font ABI');
 }
+const syntax = await readFile(syntaxPath);
+const { instance: syntaxInstance } = await WebAssembly.instantiate(syntax, {});
+for (const name of ['memory', 'alloc', 'dealloc', 'kinds', 'kinds_len', 'source_new', 'source_edit', 'source_free', 'source_tree', 'tree_len']) {
+  if (!(name in syntaxInstance.exports)) throw new Error(`syntax module is missing required export: ${name}`);
+}
 const wasmHash = digest(wasm);
 const revision = path.join(mirror, wasmHash);
 await mkdir(mirror, { recursive: true });
@@ -33,4 +39,10 @@ if (digest(publishedWasm) !== wasmHash) {
   throw new Error('WASM mirror validation failed');
 }
 
+// The parser module sits beside the compiler in the same revision directory.
+await writeFile(path.join(revision, 'typst-syntax.wasm'), syntax);
+if (digest(await readFile(path.join(revision, 'typst-syntax.wasm'))) !== digest(syntax)) {
+  throw new Error('syntax mirror validation failed');
+}
+console.log(`mirror/${wasmHash}/typst-syntax.wasm (${syntax.byteLength} bytes)`);
 console.log(`mirror/${wasmHash}/typst.wasm (${wasm.byteLength} bytes)`);

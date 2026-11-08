@@ -1,0 +1,26 @@
+# Typst's parser alone, as a second WebAssembly module.
+[package]
+name = "typst-syntax-wasm"
+version = "0.6.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "Typst's parser alone, as a WebAssembly module that returns a Lezer tree buffer"
+
+# Detached from the renderer crate one directory up: its own lockfile, its own
+# target directory, and none of the compiler in the build.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The same exact version the renderer pins: both modules must parse alike.
+typst-syntax = "=0.15.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

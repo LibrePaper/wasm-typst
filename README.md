@@ -41,6 +41,26 @@ Nothing but cargo is needed. There is no bindgen step, and no Docker: this is
 plain Rust from crates.io, which is the reason the typst engine has never had
 the supply-chain question the TeX engines do.
 
+## typst-syntax.wasm
+
+A second module released with the first: Typst's parser alone (`typst-syntax`,
+pinned to the same `0.15.1`), about 340 KB, built from `syntax/`. The editor
+uses it to build a CodeMirror/Lezer syntax tree. Plain exports, no bindgen.
+
+| Export | Meaning |
+| --- | --- |
+| `alloc(len) -> ptr`, `dealloc(ptr, len)` | memory for the host to write text into |
+| `kinds() -> ptr`, `kinds_len() -> u32` | every `SyntaxKind` name joined by `\n`; line i is kind i |
+| `source_new(ptr, len) -> handle` | parse UTF-8 text; 0 if it is not valid UTF-8 |
+| `source_edit(handle, from, to, ptr, len) -> 0 or 1` | replace the UTF-16 range `[from, to)` and reparse incrementally; 0 (nothing changed) on a bad handle, range or text |
+| `source_free(handle)` | drop a source |
+| `source_tree(handle) -> ptr`, `tree_len() -> u32` | the tree as a buffer of `tree_len` u32s, valid until the next call |
+
+The tree buffer is a Lezer tree buffer: nodes in postorder (children before
+their parent, the `Markup` root last), four u32s each, `[kind, from, to, size]`.
+`kind` indexes `kinds()`, `from` and `to` are UTF-16 offsets, and `size` is 4
+times the number of nodes in the subtree, the node itself included.
+
 ## Serving the compatibility module
 
 `make compress` writes `dist/typst.wasm.br` and `dist/typst.wasm.gz` beside the

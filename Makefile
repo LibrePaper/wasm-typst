@@ -6,6 +6,9 @@
 
 MODULE  := typst.wasm
 TARGET  := target/wasm32-unknown-unknown/release/wasm_typst.wasm
+SYNTAX        := typst-syntax.wasm
+SYNTAX_TARGET := syntax/target/wasm32-unknown-unknown/release/typst_syntax_wasm.wasm
+SYNTAX_SOURCES := $(shell find syntax/src syntax/Cargo.toml -type f 2>/dev/null)
 VERSION := $(shell grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 SOURCES := $(shell find src Cargo.toml -type f 2>/dev/null) $(shell find ../wasm-helpers/src ../wasm-helpers/document.css -type f 2>/dev/null)
 # Shared Node publisher and encrypted S3-compatible credentials live in the
@@ -21,7 +24,7 @@ help:  ## Display this help screen
 	@grep -hE '^[a-z.A-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' | sort
 
-build: dist/$(MODULE)  ## Build the module
+build: dist/$(MODULE) dist/$(SYNTAX)  ## Build both modules
 
 dist/$(MODULE): $(SOURCES)
 	@cargo build --release --target wasm32-unknown-unknown
@@ -29,12 +32,22 @@ dist/$(MODULE): $(SOURCES)
 	@cp $(TARGET) $@
 	@ls -lh $@ | awk '{print "$(MODULE)", $$5}'
 
+# Typst's parser alone, for the editor's syntax tree: its own small crate.
+dist/$(SYNTAX): $(SYNTAX_SOURCES)
+	@cargo build --release --target wasm32-unknown-unknown --manifest-path syntax/Cargo.toml
+	@mkdir -p dist
+	@cp $(SYNTAX_TARGET) $@
+	@ls -lh $@ | awk '{print "$(SYNTAX)", $$5}'
+
 # Compressed once here rather than per request by whatever serves it. Needs
 # node, which is the only thing in this repository that does; a build without
 # it still produces the module.
-compress: dist/$(MODULE).br  ## Pre-compress the module for serving
+compress: dist/$(MODULE).br dist/$(SYNTAX).br  ## Pre-compress the modules for serving
 
 dist/$(MODULE).br: dist/$(MODULE) tools/compress.mjs
+	@node tools/compress.mjs $<
+
+dist/$(SYNTAX).br: dist/$(SYNTAX) tools/compress.mjs
 	@node tools/compress.mjs $<
 
 # What the application pins. A module is addressed by the digest of its own
@@ -42,8 +55,8 @@ dist/$(MODULE).br: dist/$(MODULE) tools/compress.mjs
 # digest matches, the binary is serving the module this repository released.
 checksums: dist/SHA256SUMS  ## Write the digests the application pins
 
-dist/SHA256SUMS: dist/$(MODULE).br
-	@cd dist && sha256sum $(MODULE) $(MODULE).br $(MODULE).gz > SHA256SUMS
+dist/SHA256SUMS: dist/$(MODULE).br dist/$(SYNTAX).br
+	@cd dist && sha256sum $(MODULE) $(MODULE).br $(MODULE).gz $(SYNTAX) $(SYNTAX).br $(SYNTAX).gz > SHA256SUMS
 	@cat $@
 
 release: checksums  ## Publish the version in Cargo.toml as a GitHub release
@@ -53,12 +66,13 @@ release: checksums  ## Publish the version in Cargo.toml as a GitHub release
 	@gh release view v$(VERSION) >/dev/null 2>&1 \
 		&& { echo "v$(VERSION) is already released; bump version in Cargo.toml"; exit 1; } || true
 	@gh release create v$(VERSION) \
-		dist/$(MODULE) dist/$(MODULE).br dist/$(MODULE).gz dist/SHA256SUMS \
-		--title "$(MODULE) $(VERSION)" \
+		dist/$(MODULE) dist/$(MODULE).br dist/$(MODULE).gz \
+		dist/$(SYNTAX) dist/$(SYNTAX).br dist/$(SYNTAX).gz dist/SHA256SUMS \
+		--title "$(MODULE) and $(SYNTAX) $(VERSION)" \
 		--notes "$$(printf 'Built from %s\n\n```\n%s\n```\n' "$$(git rev-parse --short HEAD)" "$$(cat dist/SHA256SUMS)")"
 
-mirror: dist/$(MODULE) tools/mirror.mjs LICENSE NOTICE NOTICE.upstream  ## Build the content-addressed WASM mirror
-	@node tools/mirror.mjs $< mirror
+mirror: dist/$(MODULE) dist/$(SYNTAX) tools/mirror.mjs LICENSE NOTICE NOTICE.upstream  ## Build the content-addressed WASM mirror
+	@node tools/mirror.mjs dist/$(MODULE) mirror dist/$(SYNTAX)
 
 mirror-push: mirror  ## Publish the WASM mirror to the configured S3-compatible bucket
 	@node "$(PUBLISHER)" --dir mirror --prefix typst
@@ -72,11 +86,12 @@ secrets:  ## Open a shell with the sops-encrypted keys in its environment
 	@echo "$(KEYS) is loaded in this shell; exit to drop it"
 	@sops exec-env $(KEYS) "$${SHELL:-/bin/sh}"
 
-test:  ## Run the renderer's tests natively
+test:  ## Run the renderer's and the parser's tests natively
 	@cargo test
+	@cargo test --manifest-path syntax/Cargo.toml
 
 fmt:
 	@cargo fmt
 
 clean:
-	@rm -rf target dist
+	@rm -rf target syntax/target dist

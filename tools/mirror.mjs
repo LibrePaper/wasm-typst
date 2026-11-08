@@ -39,10 +39,13 @@ if (digest(publishedWasm) !== wasmHash) {
   throw new Error('WASM mirror validation failed');
 }
 
-// The parser module sits beside the compiler in the same revision directory.
-await writeFile(path.join(revision, 'typst-syntax.wasm'), syntax);
-if (digest(await readFile(path.join(revision, 'typst-syntax.wasm'))) !== digest(syntax)) {
+// The parser module is addressed by the digest of its own bytes, as every
+// module on the mirror is, so the two pins move independently.
+const syntaxHash = digest(syntax);
+await mkdir(path.join(mirror, syntaxHash), { recursive: true });
+await writeFile(path.join(mirror, syntaxHash, 'typst-syntax.wasm'), syntax);
+if (digest(await readFile(path.join(mirror, syntaxHash, 'typst-syntax.wasm'))) !== syntaxHash) {
   throw new Error('syntax mirror validation failed');
 }
-console.log(`mirror/${wasmHash}/typst-syntax.wasm (${syntax.byteLength} bytes)`);
+console.log(`mirror/${syntaxHash}/typst-syntax.wasm (${syntax.byteLength} bytes)`);
 console.log(`mirror/${wasmHash}/typst.wasm (${wasm.byteLength} bytes)`);

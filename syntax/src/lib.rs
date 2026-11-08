@@ -12,25 +12,150 @@
 use std::cell::RefCell;
 use typst_syntax::{Source, SyntaxKind, SyntaxNode};
 
-use SyntaxKind::*;
-
-/// Every kind, in discriminant order. Line i of `kinds()` is kind i.
-const KINDS: [SyntaxKind; 137] = [
-    End, Error, Shebang, LineComment, BlockComment, Markup, Text, Space, Linebreak, Parbreak,
-    Escape, Shorthand, SmartQuote, Strong, Emph, Raw, RawLang, RawDelim, RawTrimmed, Link, Label,
-    Ref, RefMarker, Heading, HeadingMarker, ListItem, ListMarker, EnumItem, EnumMarker, TermItem,
-    TermMarker, Equation, Math, MathText, MathIdent, MathFieldAccess, MathShorthand,
-    MathAlignPoint, MathCall, MathArgs, MathDelimited, MathAttach, MathPrimes, MathFrac, MathRoot,
-    Hash, LeftBrace, RightBrace, LeftBracket, RightBracket, LeftParen, RightParen, Comma,
-    Semicolon, Colon, Star, Underscore, Dollar, Plus, Minus, Slash, Hat, Dot, Eq, EqEq, ExclEq, Lt,
-    LtEq, Gt, GtEq, PlusEq, HyphEq, StarEq, SlashEq, Dots, Arrow, Root, Bang, Not, And, Or, None,
-    Auto, Let, Set, Show, Context, If, Else, For, In, While, Break, Continue, Return, Import,
-    Include, As, Code, Ident, Bool, Int, Float, Numeric, Str, CodeBlock, ContentBlock,
-    Parenthesized, Array, Dict, Named, Keyed, Unary, Binary, FieldAccess, FuncCall, Args, Spread,
-    Closure, Params, LetBinding, SetRule, ShowRule, Contextual, Conditional, WhileLoop, ForLoop,
-    ModuleImport, ImportItems, ImportItemPath, RenamedImportItem, ModuleInclude, LoopBreak,
-    LoopContinue, FuncReturn, Destructuring, DestructAssignment,
-];
+/// Every kind, in discriminant order. Line i of `kinds()` is kind i. The glob
+/// import stays in this block: `SyntaxKind::None` would shadow `Option::None`.
+const KINDS: [SyntaxKind; 137] = {
+    use SyntaxKind::*;
+    [
+        End,
+        Error,
+        Shebang,
+        LineComment,
+        BlockComment,
+        Markup,
+        Text,
+        Space,
+        Linebreak,
+        Parbreak,
+        Escape,
+        Shorthand,
+        SmartQuote,
+        Strong,
+        Emph,
+        Raw,
+        RawLang,
+        RawDelim,
+        RawTrimmed,
+        Link,
+        Label,
+        Ref,
+        RefMarker,
+        Heading,
+        HeadingMarker,
+        ListItem,
+        ListMarker,
+        EnumItem,
+        EnumMarker,
+        TermItem,
+        TermMarker,
+        Equation,
+        Math,
+        MathText,
+        MathIdent,
+        MathFieldAccess,
+        MathShorthand,
+        MathAlignPoint,
+        MathCall,
+        MathArgs,
+        MathDelimited,
+        MathAttach,
+        MathPrimes,
+        MathFrac,
+        MathRoot,
+        Hash,
+        LeftBrace,
+        RightBrace,
+        LeftBracket,
+        RightBracket,
+        LeftParen,
+        RightParen,
+        Comma,
+        Semicolon,
+        Colon,
+        Star,
+        Underscore,
+        Dollar,
+        Plus,
+        Minus,
+        Slash,
+        Hat,
+        Dot,
+        Eq,
+        EqEq,
+        ExclEq,
+        Lt,
+        LtEq,
+        Gt,
+        GtEq,
+        PlusEq,
+        HyphEq,
+        StarEq,
+        SlashEq,
+        Dots,
+        Arrow,
+        Root,
+        Bang,
+        Not,
+        And,
+        Or,
+        None,
+        Auto,
+        Let,
+        Set,
+        Show,
+        Context,
+        If,
+        Else,
+        For,
+        In,
+        While,
+        Break,
+        Continue,
+        Return,
+        Import,
+        Include,
+        As,
+        Code,
+        Ident,
+        Bool,
+        Int,
+        Float,
+        Numeric,
+        Str,
+        CodeBlock,
+        ContentBlock,
+        Parenthesized,
+        Array,
+        Dict,
+        Named,
+        Keyed,
+        Unary,
+        Binary,
+        FieldAccess,
+        FuncCall,
+        Args,
+        Spread,
+        Closure,
+        Params,
+        LetBinding,
+        SetRule,
+        ShowRule,
+        Contextual,
+        Conditional,
+        WhileLoop,
+        ForLoop,
+        ModuleImport,
+        ImportItems,
+        ImportItemPath,
+        RenamedImportItem,
+        ModuleInclude,
+        LoopBreak,
+        LoopContinue,
+        FuncReturn,
+        Destructuring,
+        DestructAssignment,
+    ]
+};
 
 // The list must be in discriminant order and end at the last variant.
 const _: () = {
@@ -39,7 +164,7 @@ const _: () = {
         assert!(KINDS[i] as usize == i);
         i += 1;
     }
-    assert!(KINDS[KINDS.len() - 1] as usize == DestructAssignment as usize);
+    assert!(KINDS[KINDS.len() - 1] as usize == SyntaxKind::DestructAssignment as usize);
 };
 
 thread_local! {
@@ -170,7 +295,12 @@ fn walk(node: &SyntaxNode, start: usize, u16_of: &dyn Fn(usize) -> u32, out: &mu
         at += child.len();
     }
     let size = (out.len() - first) as u32 + 4;
-    out.extend([node.kind() as u32, u16_of(start), u16_of(start + node.len()), size]);
+    out.extend([
+        node.kind() as u32,
+        u16_of(start),
+        u16_of(start + node.len()),
+        size,
+    ]);
 }
 
 /// Flatten the whole tree into the reused buffer and return a pointer to it;
@@ -241,7 +371,11 @@ mod tests {
         let p = kinds();
         let n = kinds_len() as usize;
         let b = unsafe { std::slice::from_raw_parts(p, n) };
-        std::str::from_utf8(b).unwrap().split('\n').map(String::from).collect()
+        std::str::from_utf8(b)
+            .unwrap()
+            .split('\n')
+            .map(String::from)
+            .collect()
     }
 
     #[test]
@@ -249,9 +383,9 @@ mod tests {
         let n = names();
         assert_eq!(n.len(), KINDS.len());
         assert_eq!(n[0], "End");
-        assert_eq!(n[Markup as usize], "Markup");
-        assert_eq!(n[Heading as usize], "Heading");
-        assert_eq!(n[Strong as usize], "Strong");
+        assert_eq!(n[SyntaxKind::Markup as usize], "Markup");
+        assert_eq!(n[SyntaxKind::Heading as usize], "Heading");
+        assert_eq!(n[SyntaxKind::Strong as usize], "Strong");
         assert_eq!(n[KINDS.len() - 1], "DestructAssignment");
         for (i, k) in KINDS.iter().enumerate() {
             assert_eq!(*k as usize, i);
@@ -264,14 +398,14 @@ mod tests {
         assert_eq!(buf.len() % 4, 0);
         let count = buf.len() / 4;
         let root = &buf[buf.len() - 4..];
-        assert_eq!(root[0], Markup as u32);
+        assert_eq!(root[0], SyntaxKind::Markup as u32);
         assert_eq!((root[1], root[2]), (0, utf16_len));
         assert_eq!(root[3] as usize, buf.len());
         // A stack of (index, subtree start index) walks the postorder buffer.
         let mut open: Vec<usize> = Vec::new();
         for i in 0..count {
             let size = buf[i * 4 + 3] as usize;
-            assert!(size >= 4 && size % 4 == 0 && size <= (i + 1) * 4);
+            assert!(size >= 4 && size.is_multiple_of(4) && size <= (i + 1) * 4);
             let first = i + 1 - size / 4;
             // Children are the open nodes that start inside this subtree.
             let mut kids = Vec::new();
@@ -299,7 +433,11 @@ mod tests {
 
     #[test]
     fn well_formed() {
-        for t in ["", "= Title\n\nSome *bold* text and $x^2$.\n#let a = (1, 2)\n", "#{ ( ["] {
+        for t in [
+            "",
+            "= Title\n\nSome *bold* text and $x^2$.\n#let a = (1, 2)\n",
+            "#{ ( [",
+        ] {
             let h = new(t);
             let b = tree(h);
             check(&b, t.encode_utf16().count() as u32);
@@ -314,7 +452,10 @@ mod tests {
         let b = tree(h);
         check(&b, t.encode_utf16().count() as u32);
         // Strong spans `*😀*`: é and a space precede it, the emoji is two units.
-        let strong = b.chunks(4).find(|n| n[0] == Strong as u32).unwrap();
+        let strong = b
+            .chunks(4)
+            .find(|n| n[0] == SyntaxKind::Strong as u32)
+            .unwrap();
         assert_eq!((strong[1], strong[2]), (2, 6));
         // Every offset lands on a character boundary of the UTF-16 text.
         let units: Vec<u16> = t.encode_utf16().collect();

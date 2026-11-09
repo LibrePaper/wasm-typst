@@ -11,10 +11,9 @@ SYNTAX_TARGET := syntax/target/wasm32-unknown-unknown/release/typst_syntax_wasm.
 SYNTAX_SOURCES := $(shell find syntax/src syntax/Cargo.toml -type f 2>/dev/null)
 VERSION := $(shell grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 SOURCES := $(shell find src Cargo.toml -type f 2>/dev/null) $(shell find ../wasm-helpers/src ../wasm-helpers/document.css -type f 2>/dev/null)
-# Shared Node publisher and encrypted S3-compatible credentials live in the
-# sibling application checkout. Both paths can be overridden by callers.
-PUBLISHER ?= ../librepaper/tools/publish-mirror.mjs
-KEYS      ?= ../librepaper/deploy/keys.yaml
+# Encrypted S3-compatible credentials live in the sibling application
+# checkout. The path can be overridden by callers.
+KEYS      ?= ../librepaper/tools/deploy/keys.yaml
 
 .DEFAULT_GOAL := help
 .PHONY: help build compress checksums release mirror mirror-push secrets test fmt clean
@@ -74,8 +73,14 @@ release: checksums  ## Publish the version in Cargo.toml as a GitHub release
 mirror: dist/$(MODULE) dist/$(SYNTAX) tools/mirror.mjs LICENSE NOTICE NOTICE.upstream  ## Build the content-addressed WASM mirror
 	@node tools/mirror.mjs dist/$(MODULE) mirror dist/$(SYNTAX)
 
-mirror-push: mirror  ## Publish the WASM mirror to the configured S3-compatible bucket
-	@node "$(PUBLISHER)" --dir mirror --prefix typst
+mirror-push:  ## How to publish the release to the WASM mirror (from LibrePaper)
+	@echo "Publish the release from the LibrePaper checkout, after make release:"
+	@echo "  cd ../librepaper"
+	@echo "  node tools/assets/pins.mjs update release --repo wasm-typst --tag v$(VERSION)"
+	@echo "  node tools/assets/pins.mjs fetch"
+	@echo "  tools/assets/mirror publish --dry-run"
+	@echo "  tools/assets/mirror publish"
+	@echo "See docs/dev/asset-mirrors.md in ../librepaper."
 
 # A target cannot export into the shell that ran make, so this opens a
 # subshell with the keys decrypted in its environment; exit it to drop them.

@@ -96,19 +96,16 @@ mirror/NOTICE
 mirror/NOTICE.upstream
 ```
 
-The directory name is the SHA-256 of the raw module bytes. The shared Node
+The directory name is the SHA-256 of the raw module bytes. LibrePaper's mirror
 publisher uploads the module with gzip content encoding while retaining the
 raw-byte hash path, plus the license notices. There is no module size gate or
 separate font manifest.
 
-Publishing requires Node.js, AWS CLI v2, and these environment variables:
-`S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, and
-`AWS_SECRET_ACCESS_KEY` (optionally `AWS_SESSION_TOKEN`). The OVH endpoint and
-credentials still need to be provisioned; the current sibling `deploy/keys.yaml`
-does not supply them. Once configured, run `make mirror-push` in a shell with
-those variables. If they are later added to the encrypted keys file, use
-`make secrets` or `sops exec-env` to provide them. Override `KEYS=` or
-`PUBLISHER=` when needed.
+Publishing runs from the LibrePaper checkout, not from this repository: after
+`make release`, LibrePaper pins the new version and its `tools/assets/mirror
+publish` uploads every pinned module, reading the S3 credentials from its
+sops-encrypted `tools/deploy/keys.yaml`. `make mirror-push` prints the steps;
+see `docs/dev/asset-mirrors.md` in LibrePaper.
 
 The mirror generator, compression step and `tools/roundtrip.mjs`, which checks
 the package and font round trip against the live registry, need Node.js.

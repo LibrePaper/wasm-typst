@@ -30,7 +30,7 @@ use typst::diag::{
 };
 use typst::foundations::{Bytes, Datetime, Duration, Output};
 use typst::syntax::package::PackageSpec;
-use typst::syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot};
+use typst::syntax::{FileId, RootedPath, Source, Span, VirtualPath, VirtualRoot};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Library, LibraryExt, World, WorldExt};
@@ -166,6 +166,18 @@ fn quote(text: &str) -> String {
 pub struct Outcome {
     pub compiled: Compiled,
     pub needs: Needs,
+    /// The project files an HTML compile's elements were placed in, by tag:
+    /// `sources[T]` is the file that `data-sourcepos` tag `T` names, with the
+    /// main file at 0. Empty for a PDF compile.
+    pub sources: Vec<String>,
+}
+
+impl Outcome {
+    /// The sources table as JSON, for the host: `["main.typ","other.typ"]`.
+    pub fn sources_json(&self) -> String {
+        let files: Vec<String> = self.sources.iter().map(|path| quote(path)).collect();
+        format!("[{}]", files.join(","))
+    }
 }
 
 /// A set of fonts the compiler may set text in: a book to choose from, and the
@@ -414,8 +426,12 @@ pub fn compile_html(
 
     let compiled = typst::compile::<typst_html::HtmlDocument>(&world);
     let mut diagnostics = describe(&world, &compiled.warnings);
+    let mut sources = Vec::new();
     let output = match compiled.output {
-        Ok(document) => {
+        Ok(mut document) => {
+            // Before the document is stored, so the last-document copy that
+            // completion reads carries the same attributes.
+            sources = stamp_source_positions(&mut document, &world);
             let html = typst_html::html(&document, &typst_html::HtmlOptions::default());
             // Label and reference completion reads the last document that
             // compiled, so a document that is broken mid-edit still completes.
@@ -471,7 +487,95 @@ pub fn compile_html(
             diagnostics,
         },
         needs,
+        sources,
     }
+}
+
+/// The attribute an HTML element carries its source position in.
+const SOURCE_POSITION: &str = "data-sourcepos";
+
+/// Writes each element's place in the author's source into it, as
+/// `data-sourcepos="T:L:C-T:L:C"`: the start and the end of its span, with `T`
+/// a tag into the returned table of files. A reader's selection in the HTML
+/// preview is then a selection of elements, and each one names the lines it was
+/// typed on. Typst already carries a span on every element, so this only writes
+/// those spans out.
+///
+/// Tag 0 is the main file. Each other project file gets the next tag the first
+/// time an element is placed in it. Packages and the standard library are not
+/// the author's to point at, so their elements, and any element whose span is
+/// detached, get no attribute and no tag. Elements that already carry the
+/// attribute keep it.
+fn stamp_source_positions(
+    document: &mut typst_html::HtmlDocument,
+    world: &DocumentWorld,
+) -> Vec<String> {
+    let attr =
+        typst_html::HtmlAttr::intern(SOURCE_POSITION).expect("a fixed attribute name is valid");
+    let mut tagged = vec![(world.main.id(), world.main.clone())];
+    stamp(document.root_mut(), world, attr, &mut tagged);
+    tagged.iter().map(|(id, _)| file_name(*id)).collect()
+}
+
+/// Stamps an element, then its element children. Frames and text carry no
+/// attributes, so only elements are visited.
+fn stamp(
+    element: &mut typst_html::HtmlElement,
+    world: &DocumentWorld,
+    attr: typst_html::HtmlAttr,
+    tagged: &mut Vec<(FileId, Source)>,
+) {
+    if element.attrs.get(attr).is_none() {
+        if let Some(value) = source_position(element.span, world, tagged) {
+            element.attrs.push(attr, value);
+        }
+    }
+    for child in element.children.make_mut() {
+        if let typst_html::HtmlNode::Element(child) = child {
+            stamp(child, world, attr, tagged);
+        }
+    }
+}
+
+/// The `T:L:C-T:L:C` position of a span, or `None` when it is not in a project
+/// file. A file is tagged the first time it is seen, and its source is kept so
+/// each later element in it is placed without reading the file again.
+fn source_position(
+    span: Span,
+    world: &DocumentWorld,
+    tagged: &mut Vec<(FileId, Source)>,
+) -> Option<String> {
+    let id = span.id()?;
+    if !matches!(id.root(), VirtualRoot::Project) {
+        return None;
+    }
+    let range = world.range(span)?;
+    let tag = match tagged.iter().position(|(known, _)| *known == id) {
+        Some(tag) => tag,
+        None => {
+            let source = world.source(id).ok()?;
+            tagged.push((id, source));
+            tagged.len() - 1
+        }
+    };
+    let source = &tagged[tag].1;
+    let (line, column) = line_and_char(source, range.start);
+    let (end_line, end_column) = line_and_char(source, range.end);
+    Some(format!("{tag}:{line}:{column}-{tag}:{end_line}:{end_column}"))
+}
+
+/// A byte offset as a one-based line and column, the column counted in
+/// characters. The HTML preview's positions are read by the editor the same
+/// way the LaTeX preview's are, so they are counted in characters rather than
+/// the UTF-16 units of [`place`].
+fn line_and_char(source: &Source, byte: usize) -> (usize, usize) {
+    let lines = source.lines();
+    let Some(line) = lines.byte_to_line(byte) else {
+        return (0, 0);
+    };
+    let start = lines.line_to_byte(line).unwrap_or(byte);
+    let head = source.text().get(start..byte).unwrap_or("");
+    (line + 1, head.chars().count() + 1)
 }
 
 /// The document being compiled, named for its imports' sake: a sibling file
@@ -619,6 +723,7 @@ pub fn compile_pdf(
             diagnostics,
         },
         needs,
+        sources: Vec::new(),
     }
 }
 
@@ -964,6 +1069,58 @@ mod tests {
         assert!(is_font("Inter.TTF"));
         assert!(is_font("a.otf") && is_font("a.ttc") && is_font("a.otc"));
         assert!(!is_font("a.woff2"));
+    }
+
+    /// The opening tag of the first element named `name`, attributes included.
+    fn opening_tag<'a>(html: &'a str, name: &str) -> Option<&'a str> {
+        let start = html.find(&format!("<{name} "))?;
+        let end = html[start..].find('>')?;
+        Some(&html[start..start + end])
+    }
+
+    // The HTML preview says which lines each element was typed on, so a
+    // selection in it can be traced back to the source. Tag 0 is the main file.
+    #[test]
+    fn html_elements_carry_their_source_position() {
+        let outcome = compile_html(
+            "= Title\n\nHello *world*.\n",
+            "main.typ",
+            &no_files,
+            NO_FONTS,
+            None,
+        );
+        let html = match outcome.compiled.output {
+            Some(RenderedDocument::Html(html)) => html,
+            other => panic!("expected HTML output, got {other:?}"),
+        };
+        let heading = opening_tag(&html, "h2").expect("no h2");
+        assert!(heading.contains("data-sourcepos=\"0:1:"), "{heading}");
+        let paragraph = opening_tag(&html, "p").expect("no paragraph");
+        assert!(paragraph.contains("data-sourcepos=\"0:3:"), "{paragraph}");
+        assert_eq!(outcome.sources[0], "main.typ");
+    }
+
+    // An element from an imported file is placed in that file under its own
+    // tag, and the table names the file at that tag.
+    #[test]
+    fn html_elements_from_an_import_name_their_file() {
+        let files = |path: &Path| -> Option<Vec<u8>> {
+            (path == Path::new("other.typ")).then(|| b"= Other\n\nInside.\n".to_vec())
+        };
+        let outcome = compile_html(
+            "Before.\n\n#include \"other.typ\"\n",
+            "main.typ",
+            &files,
+            NO_FONTS,
+            None,
+        );
+        let html = match outcome.compiled.output {
+            Some(RenderedDocument::Html(html)) => html,
+            other => panic!("expected HTML output, got {other:?}"),
+        };
+        let heading = opening_tag(&html, "h2").expect("no h2");
+        assert!(heading.contains("data-sourcepos=\"1:1:"), "{heading}");
+        assert_eq!(outcome.sources, ["main.typ", "other.typ"]);
     }
 
     #[test]

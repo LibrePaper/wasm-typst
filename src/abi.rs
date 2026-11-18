@@ -6,11 +6,12 @@
 //! a dependency -- and because nineteen signatures you can read beat a macro
 //! that writes them and reports its errors somewhere else.
 //!
-//! Two of them are this module's alone. `needs` and `needs_ptr` say what the
+//! Three of them are this module's alone. `needs` and `needs_ptr` say what the
 //! last compile went looking for and did not find -- packages and font
 //! families -- as JSON, so the host can fetch them, `add_file` them, and
 //! compile again. A loader that has never heard of them loses nothing but
-//! packages.
+//! packages. `sources` and `sources_ptr` say which project file each
+//! `data-sourcepos` tag in the last HTML compile names, as JSON.
 //!
 //! `set_asset_url` is accepted and ignored: typst reads a figure out of the
 //! file map and embeds it in PDF and HTML output itself, so it needs no URL.
@@ -22,6 +23,10 @@ use wasm_helpers::diagnostic::Compiled;
 
 /// What the last compile could not find, as JSON, for `needs` to hand over.
 static mut NEEDS: Option<Vec<u8>> = None;
+
+/// The files the last compile's `data-sourcepos` tags name, as JSON, for
+/// `sources` to hand over.
+static mut SOURCES: Option<Vec<u8>> = None;
 
 /// What this module is: typst, reading only the files the host handed over.
 /// There is no directory in a browser, and a document reaches nothing else --
@@ -40,7 +45,10 @@ fn render(source: &str, title: &str) -> Compiled {
         .collect();
     let outcome =
         crate::typst::render(source, title, &name, &|path| abi::file(path), &fonts, today);
-    unsafe { NEEDS = Some(outcome.needs.json().into_bytes()) }
+    unsafe {
+        NEEDS = Some(outcome.needs.json().into_bytes());
+        SOURCES = Some(outcome.sources_json().into_bytes());
+    }
     outcome.compiled
 }
 
@@ -57,7 +65,10 @@ fn render_html(source: &str, title: &str) -> Compiled {
         .collect();
     let _ = title;
     let outcome = crate::typst::compile_html(source, &name, &|path| abi::file(path), &fonts, today);
-    unsafe { NEEDS = Some(outcome.needs.json().into_bytes()) }
+    unsafe {
+        NEEDS = Some(outcome.needs.json().into_bytes());
+        SOURCES = Some(outcome.sources_json().into_bytes());
+    }
     outcome.compiled
 }
 
@@ -313,6 +324,32 @@ pub extern "C" fn needs() -> usize {
 pub extern "C" fn needs_ptr() -> *const u8 {
     unsafe {
         match &*std::ptr::addr_of!(NEEDS) {
+            Some(bytes) => bytes.as_ptr(),
+            None => std::ptr::null(),
+        }
+    }
+}
+
+/// The length of the file table of the last compile, as JSON:
+/// `["main.typ","other.typ"]`. Entry `T` is the project file that the
+/// `data-sourcepos="T:L:C-T:L:C"` attributes of the HTML output name by `T`,
+/// with the main file at 0. Only an HTML compile fills it in; a PDF compile
+/// leaves it empty. Zero before any compile.
+#[no_mangle]
+pub extern "C" fn sources() -> usize {
+    unsafe {
+        match &*std::ptr::addr_of!(SOURCES) {
+            Some(bytes) => bytes.len(),
+            None => 0,
+        }
+    }
+}
+
+/// Where that JSON starts.
+#[no_mangle]
+pub extern "C" fn sources_ptr() -> *const u8 {
+    unsafe {
+        match &*std::ptr::addr_of!(SOURCES) {
             Some(bytes) => bytes.as_ptr(),
             None => std::ptr::null(),
         }

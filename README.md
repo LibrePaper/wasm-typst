@@ -134,6 +134,7 @@ memory, calls, and reads the result back out.
 | `word_diff(old, new)` | the shared word-level diff, as JSON |
 | `complete(request)` | autocomplete at a cursor; the request is JSON `{path, source, offset, explicit, files}` with a UTF-8 byte `offset`, the answer `{from, options}` or `null`; labels come from the last compile |
 | `needs` / `needs_ptr` | what the last compile could not find — packages and font families — as JSON |
+| `sources` / `sources_ptr` | the file each `data-sourcepos` tag of the last HTML compile names, as JSON; empty for PDF |
 
 A compile leaves two results side by side: the document where `output_ptr`
 points, and the diagnostics where `diagnostics_ptr` does. Two rather than one

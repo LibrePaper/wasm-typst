@@ -561,7 +561,9 @@ fn source_position(
     let source = &tagged[tag].1;
     let (line, column) = line_and_char(source, range.start);
     let (end_line, end_column) = line_and_char(source, range.end);
-    Some(format!("{tag}:{line}:{column}-{tag}:{end_line}:{end_column}"))
+    Some(format!(
+        "{tag}:{line}:{column}-{tag}:{end_line}:{end_column}"
+    ))
 }
 
 /// A byte offset as a one-based line and column, the column counted in
